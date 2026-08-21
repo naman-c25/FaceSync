@@ -1,0 +1,22 @@
+# ML service dependencies — Python 3.14 compatible.
+#
+# NOTE: DeepFace/TensorFlow are deliberately NOT used. TensorFlow publishes no
+# wheel for Python 3.14. InsightFace runs the same ArcFace architecture on
+# ONNX Runtime instead: smaller, faster to start, and no TF dependency tree.
+
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
+
+numpy
+opencv-python
+pillow
+
+# Face detection + 512-d ArcFace embeddings (buffalo_l model pack)
+insightface
+onnxruntime
+
+# 468-point Face Mesh + iris landmarks — drives EAR and gaze liveness
+mediapipe

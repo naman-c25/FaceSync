@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Model weights — fetched by ml-service/setup_models.py, ~300MB
+ml-service/models/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Local config and secrets
+.env
+*.local
+
+# Captured faces used for local testing only. These are raw biometric images
+# and must never reach a remote — the production data flow stores encrypted
+# embeddings, never pictures.
+test-data/enrollment_samples/*
+test-data/spoof_test_cases/*
+!test-data/**/.gitkeep
+
+# Calibration output
+*.results.json
+
+# OS
+Thumbs.db
+.DS_Store
