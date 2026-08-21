@@ -133,6 +133,16 @@ its first few frames and requires the signal to move away from it, which a
 fixed pose cannot do. An API test caught exactly this: a cropped face from a
 group photo passed a look step until the check became relative.
 
+**EAR is only read on a roughly frontal face.** EAR divides eyelid height by
+the eye's corner-to-corner width, and that width foreshortens as the head turns
+while the height barely does. So a turning head drives EAR wherever the
+geometry takes it, with no eyelid movement involved — a live webcam session
+recorded an "open eye" at 1.414 and a floor at 0.028 purely from head rotation.
+Feeding those swings to the blink counter meant a challenge could be passed by
+turning the head back and forth without ever blinking. Frames below
+`min_frontality_for_blink` are now skipped for blink purposes, and skipped when
+logging EAR too, so the audit trail cannot fill with impossible values.
+
 **Eyes or head, either one.** Told to "look left", some people swivel their
 eyes and others turn their head — and a head turn keeps the iris centred
 between the eye corners, so the gaze ratio barely moves. Scoring only eye

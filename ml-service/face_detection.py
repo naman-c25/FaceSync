@@ -70,6 +70,22 @@ class FaceGeometry:
     gaze_horizontal: float  # 0.0 = image-left, 0.5 = centre, 1.0 = image-right
     gaze_vertical: float  # 0.0 = image-top, 1.0 = image-bottom
     head_yaw: float  # 0.5 = square to camera, rises as the head turns image-right
+    frontality: float  # 1.0 = head-on, 0.0 = full profile
+
+    @property
+    def ear_is_meaningful(self) -> bool:
+        """Whether EAR can be read at all on this frame.
+
+        EAR divides eyelid height by eye width, and eye width foreshortens as
+        the head turns while the height barely does — so a turned head inflates
+        EAR without the eye having changed. Past a certain angle the number
+        stops describing eyelids and starts describing head pose.
+        """
+        low, high = settings.ear_plausible_range
+        return (
+            self.frontality >= settings.min_frontality_for_blink
+            and low <= self.ear <= high
+        )
 
 
 def _get_detector():
@@ -224,6 +240,11 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
         gaze_h = 1.0 - gaze_h
         yaw = 1.0 - yaw
 
+    # Yaw of 0.5 means the nose sits midway between the face edges, which only
+    # happens head-on. Distance from that midpoint is distance from frontal,
+    # doubled so the scale runs 1.0 (square) to 0.0 (profile).
+    frontality = max(0.0, 1.0 - 2.0 * abs(yaw - 0.5))
+
     return FaceGeometry(
         landmarks=points,
         ear=0.5 * (ear_left + ear_right),
@@ -232,4 +253,5 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
         gaze_horizontal=round(gaze_h, 4),
         gaze_vertical=round(gaze_v, 4),
         head_yaw=round(yaw, 4),
+        frontality=round(frontality, 4),
     )

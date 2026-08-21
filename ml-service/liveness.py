@@ -90,6 +90,7 @@ class LivenessSignals:
 
     frames_processed: int = 0
     frames_without_face: int = 0
+    frames_ear_unusable: int = 0
     blinks_detected: int = 0
     ear_min: float | None = None
     ear_max: float | None = None
@@ -251,7 +252,19 @@ class LivenessSession:
         That distinction is what separates a real blink from a photo of
         someone with their eyes closed, which would otherwise sit under the
         threshold forever and count as an endless string of blinks.
+
+        Frames where the head is too turned are skipped rather than scored. On
+        those, EAR is measuring foreshortening rather than eyelids, and a value
+        that drifts under the threshold because the face rotated would be
+        counted as a blink that never happened.
         """
+        if not geometry.ear_is_meaningful:
+            # Not a blink and not evidence against one — drop the frame and
+            # abandon any closure in progress, since its end cannot be seen.
+            self._eyes_closed_run = 0
+            self.signals.frames_ear_unusable += 1
+            return False
+
         if geometry.ear < settings.ear_threshold:
             self._eyes_closed_run += 1
             return False
@@ -342,11 +355,14 @@ class LivenessSession:
     def _record_signals(self, geometry: FaceGeometry) -> None:
         signals = self.signals
 
-        for name, value in (
-            ("ear", geometry.ear),
-            ("gaze", geometry.gaze_horizontal),
-            ("yaw", geometry.head_yaw),
-        ):
+        # EAR is only logged from frames where it means something. Recording it
+        # from turned-head frames would fill the audit trail with values that
+        # look like impossible blinks and make threshold tuning misleading.
+        tracked = [("gaze", geometry.gaze_horizontal), ("yaw", geometry.head_yaw)]
+        if geometry.ear_is_meaningful:
+            tracked.append(("ear", geometry.ear))
+
+        for name, value in tracked:
             low, high = getattr(signals, f"{name}_min"), getattr(signals, f"{name}_max")
             setattr(signals, f"{name}_min", value if low is None else min(low, value))
             setattr(signals, f"{name}_max", value if high is None else max(high, value))

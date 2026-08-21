@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     # people with narrow eyes may need this lowered.
     ear_threshold: float = 0.21
 
+    # EAR divides eyelid height by the eye's corner-to-corner width, and that
+    # width foreshortens as the head turns while the height barely does. Near
+    # profile the denominator collapses and EAR explodes — values above 1.0 are
+    # routine at extreme angles and mean nothing about whether the eye is open.
+    #
+    # So blinks are only counted while the face is roughly square to the
+    # camera. `frontality` is 1.0 head-on and 0.0 at full profile; 0.75 allows
+    # a normal amount of head movement while keeping EAR meaningful.
+    min_frontality_for_blink: float = 0.75
+
+    # Anything outside this band is not a measurement of an eye, whatever the
+    # geometry says — a hard backstop for frames the frontality gate misses.
+    ear_plausible_range: tuple[float, float] = (0.05, 0.60)
+
     # A blink must span at least this many consecutive frames below threshold.
     # Guards against single-frame noise being counted as a blink.
     ear_consec_frames: int = 2

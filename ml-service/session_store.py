@@ -16,6 +16,7 @@ from typing import Generic, TypeVar
 import numpy as np
 
 from config import settings
+from face_detection import FaceGeometry
 from liveness import LivenessSession
 
 
@@ -65,22 +66,24 @@ class VerificationSession:
         return True
 
 
-def frame_quality_score(ear: float, gaze_horizontal: float, sharpness: float) -> float:
+def frame_quality_score(geometry: FaceGeometry, sharpness: float) -> float:
     """Rank a frame's suitability for embedding — higher is better.
 
-    Sharpness sets the scale, then two penalties scale it down:
+    Sharpness sets the scale, then three penalties scale it down:
 
-    - Eyes below the blink threshold score zero outright. A closed-eye frame
-      is unusable for recognition no matter how sharp it is.
-    - Gaze away from centre is penalised proportionally, because ArcFace was
-      trained mostly on faces looking at the camera and a hard sideways glance
-      pushes the embedding away from the enrolled average.
+    - A closed eye scores zero outright, however sharp the frame is. The test
+      is skipped on frames where the head is too turned for EAR to mean
+      anything, since there a low value describes the angle, not the eyelid.
+    - A turned head is penalised, because ArcFace was trained mostly on faces
+      looking at the camera and a profile pushes the embedding away from the
+      enrolled average.
+    - Gaze away from centre is penalised the same way and for the same reason.
     """
-    if ear < settings.ear_threshold:
+    if geometry.ear_is_meaningful and geometry.ear < settings.ear_threshold:
         return 0.0
 
-    frontality = 1.0 - 2.0 * abs(gaze_horizontal - 0.5)
-    return sharpness * max(frontality, 0.0)
+    gaze_centrality = max(0.0, 1.0 - 2.0 * abs(geometry.gaze_horizontal - 0.5))
+    return sharpness * geometry.frontality * gaze_centrality
 
 
 SessionT = TypeVar("SessionT", EnrollmentSession, VerificationSession)

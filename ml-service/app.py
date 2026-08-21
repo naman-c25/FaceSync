@@ -302,10 +302,7 @@ def verify_frame(request: FrameRequest) -> VerifyFrameResponse:
     geometry = face_detection.analyse(frame) if frame is not None else None
 
     if frame is not None and geometry is not None:
-        session.offer_frame(
-            frame,
-            frame_quality_score(geometry.ear, geometry.gaze_horizontal, sharpness),
-        )
+        session.offer_frame(frame, frame_quality_score(geometry, sharpness))
 
     session.liveness.submit_frame(geometry)
 

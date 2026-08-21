@@ -34,7 +34,12 @@ def geometry(
     gaze: float = GAZE_CENTRE,
     yaw: float = HEAD_SQUARE,
 ) -> FaceGeometry:
-    """A synthetic frame. Landmarks are noise — only the scalars are read."""
+    """A synthetic frame. Landmarks are noise — only the scalars are read.
+
+    Frontality is derived from yaw exactly as `face_detection.analyse` does it,
+    so a test that turns the head far enough gets the same EAR gating that a
+    real turned head would.
+    """
     return FaceGeometry(
         landmarks=np.zeros((478, 2), dtype=np.float32),
         ear=ear,
@@ -43,6 +48,7 @@ def geometry(
         gaze_horizontal=gaze,
         gaze_vertical=0.5,
         head_yaw=yaw,
+        frontality=max(0.0, 1.0 - 2.0 * abs(yaw - 0.5)),
     )
 
 
@@ -107,6 +113,70 @@ def test_single_frame_dip_is_not_a_blink():
 
     assert session.signals.blinks_detected == 0
     assert session.status is LivenessStatus.IN_PROGRESS
+
+
+def test_a_turned_head_does_not_manufacture_blinks():
+    """The bug a real webcam session exposed.
+
+    EAR divides eyelid height by eye width, and eye width foreshortens as the
+    head turns while the height barely does. Turning the head therefore drives
+    EAR wherever the geometry happens to take it — a live tool measured an
+    "open eye" at 1.414 and a floor at 0.028 purely from head rotation. Those
+    frames must not be scored as eyelid movement.
+    """
+    profile = 0.5 - (settings.min_frontality_for_blink / 2.0) - 0.05
+
+    session = LivenessSession("turned", [ChallengeStep(ActionType.BLINK, count=1)])
+    # EAR swinging wildly, but every frame taken at a steep angle.
+    feed(
+        session,
+        [geometry(ear=e, yaw=profile) for e in (0.03, 1.41, 0.03, 1.41) for _ in range(4)],
+    )
+
+    assert session.signals.blinks_detected == 0
+    assert session.signals.frames_ear_unusable == 16
+
+
+def test_an_implausible_ear_is_ignored_even_when_frontal():
+    """A backstop for whatever the frontality gate misses."""
+    session = LivenessSession("impl", [ChallengeStep(ActionType.BLINK, count=1)])
+    feed(session, [geometry(ear=2.5), geometry(ear=0.001)] * 6)
+
+    assert session.signals.blinks_detected == 0
+
+
+def test_a_blink_still_counts_at_a_normal_head_angle():
+    """The gate must not be so tight that ordinary head movement blocks blinks."""
+    slight = 0.5 + 0.05
+    session = LivenessSession("slight", [ChallengeStep(ActionType.BLINK, count=1)])
+
+    closed = [geometry(ear=EYES_SHUT, yaw=slight)] * settings.ear_consec_frames
+    feed(session, closed + [geometry(ear=EYES_OPEN, yaw=slight)] * 2)
+
+    assert session.signals.blinks_detected == 1
+
+
+def test_a_closure_interrupted_by_a_head_turn_is_not_a_blink():
+    """The end of the closure has to be seen for it to have been a blink."""
+    profile = 0.5 - (settings.min_frontality_for_blink / 2.0) - 0.05
+    session = LivenessSession("interrupted", [ChallengeStep(ActionType.BLINK, count=1)])
+
+    feed(session, [geometry(ear=EYES_SHUT)] * settings.ear_consec_frames)
+    feed(session, [geometry(ear=EYES_SHUT, yaw=profile)] * 3)
+    feed(session, [geometry(ear=EYES_OPEN)] * 3)
+
+    assert session.signals.blinks_detected == 0
+
+
+def test_ear_signals_are_logged_only_from_usable_frames():
+    """Otherwise the audit trail fills with EAR values that cannot be real."""
+    profile = 0.5 - (settings.min_frontality_for_blink / 2.0) - 0.05
+    session = LivenessSession("log", [ChallengeStep(ActionType.BLINK, count=3)])
+
+    feed(session, [geometry(ear=1.41, yaw=profile)] * 5)
+    feed(session, [geometry(ear=EYES_OPEN)] * 5)
+
+    assert session.signals.ear_max == pytest.approx(EYES_OPEN)
 
 
 def test_eyes_held_shut_never_counts_as_a_blink():

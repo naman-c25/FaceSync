@@ -38,6 +38,7 @@ What to do, in order:
 Quitting prints thresholds derived from what you actually did.
 """
 
+import statistics
 import sys
 from pathlib import Path
 
@@ -71,6 +72,7 @@ class Readings:
     def reset(self) -> None:
         self.extremes: dict[str, tuple[float, float]] = {}
         self.baseline: dict[str, float] = {}
+        self.rest_noise: dict[str, float] = {}
         self._samples: dict[str, list[float]] = {}
 
     @property
@@ -78,11 +80,20 @@ class Readings:
         return not self.baseline
 
     def update(self, **values: float) -> None:
+        """Record one frame's signals. Pass a value of None to skip a signal.
+
+        EAR is skipped on turned-head frames — there it measures foreshortening
+        rather than eyelids, and letting those readings set the observed range
+        is what produces impossible values like an "open eye" EAR of 1.4.
+        """
         # Absolute extremes are tracked for every signal, because EAR is
         # thresholded absolutely — the blink floor is the number that matters
-        # there. Gaze and yaw shifts are derived from these against the
-        # baseline, since liveness scores those on movement instead.
+        # there. Gaze and yaw shifts are derived against the baseline instead,
+        # since liveness scores those on movement.
         for name, value in values.items():
+            if value is None:
+                continue
+
             low, high = self.extremes.get(name, (value, value))
             self.extremes[name] = (min(low, value), max(high, value))
 
@@ -91,6 +102,10 @@ class Readings:
 
         if self.calibrating and self.calibration_progress() >= 1.0:
             self.baseline = {name: sum(s) / len(s) for name, s in self._samples.items()}
+            self.rest_noise = {
+                name: statistics.pstdev(s) if len(s) > 1 else 0.0
+                for name, s in self._samples.items()
+            }
 
     def calibration_progress(self) -> float:
         if not self._samples:
@@ -207,20 +222,30 @@ def main() -> int:
             if geometry is None:
                 lines.append(("NO FACE DETECTED", RED))
             else:
+                usable = geometry.ear_is_meaningful
                 readings.update(
-                    ear=geometry.ear,
+                    ear=geometry.ear if usable else None,
                     gaze=geometry.gaze_horizontal,
                     yaw=geometry.head_yaw,
                 )
 
-                eyes_open = geometry.ear >= settings.ear_threshold
-                lines.append(
-                    (
-                        f"EAR   {geometry.ear:.3f}  thr {settings.ear_threshold}"
-                        f"   {'open' if eyes_open else 'CLOSED'}",
-                        GREEN if eyes_open else AMBER,
+                if not usable:
+                    lines.append(
+                        (
+                            f"EAR   {geometry.ear:.3f}  IGNORED - head too turned"
+                            f" (frontality {geometry.frontality:.2f})",
+                            RED,
+                        )
                     )
-                )
+                else:
+                    eyes_open = geometry.ear >= settings.ear_threshold
+                    lines.append(
+                        (
+                            f"EAR   {geometry.ear:.3f}  thr {settings.ear_threshold}"
+                            f"   {'open' if eyes_open else 'CLOSED'}",
+                            GREEN if eyes_open else AMBER,
+                        )
+                    )
 
                 if readings.calibrating:
                     percent = int(readings.calibration_progress() * 100)
@@ -361,7 +386,20 @@ def suggest(readings: Readings) -> None:
             )
             continue
 
-        print(f"  {key:<13} = {0.6 * reachable:.2f}      (moved {low:+.3f}..{high:+.3f})")
+        # The threshold has to clear the jitter you produce sitting still, and
+        # sit well under what you can actually reach. Four standard deviations
+        # of rest noise is the floor; 40% of the weaker direction is the
+        # target. Taking the weaker direction matters — a threshold sized on a
+        # big left turn would be unreachable to the right. 40% rather than 60%
+        # because calibration movements are deliberate and kiosk ones are not.
+        noise_floor = 4.0 * readings.rest_noise.get(name, 0.0)
+        suggested = max(0.4 * reachable, noise_floor)
+
+        note = "  <- raised to clear rest jitter" if noise_floor > 0.4 * reachable else ""
+        print(
+            f"  {key:<13} = {suggested:.2f}      (moved {low:+.3f}..{high:+.3f},"
+            f" jitter {readings.rest_noise.get(name, 0.0):.3f}){note}"
+        )
 
     print("=" * 60)
 
