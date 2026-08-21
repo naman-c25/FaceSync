@@ -57,11 +57,16 @@ def feed(session: LivenessSession, frames: list[FaceGeometry | None]) -> None:
         session.submit_frame(frame)
 
 
-def blink_frames(count: int) -> list[FaceGeometry]:
-    """Eyes shut long enough to register, then open again to close the blink."""
-    closed = [geometry(ear=EYES_SHUT)] * settings.ear_consec_frames
-    opened = [geometry(ear=EYES_OPEN)] * 2
-    return (closed + opened) * count
+def eyes_open_baseline(ear: float = EYES_OPEN) -> list[FaceGeometry]:
+    """Frames a blink step uses to learn this person's open-eye EAR."""
+    return [geometry(ear=ear)] * settings.ear_baseline_frames
+
+
+def blink_frames(count: int, open_ear: float = EYES_OPEN) -> list[FaceGeometry]:
+    """Baseline, then eyes shut long enough to register, then open again."""
+    closed = [geometry(ear=open_ear * 0.2)] * settings.ear_consec_frames
+    opened = [geometry(ear=open_ear)] * 2
+    return eyes_open_baseline(open_ear) + (closed + opened) * count
 
 
 def at_rest(count: int | None = None) -> list[FaceGeometry]:
@@ -115,6 +120,98 @@ def test_single_frame_dip_is_not_a_blink():
     assert session.status is LivenessStatus.IN_PROGRESS
 
 
+# Open-eye and blink-floor EAR measured from five people with the webcam tool.
+# The spread is the reason the threshold is relative: one fixed number cannot
+# sit safely between 0.086 and 0.316.
+MEASURED_SUBJECTS = [
+    (0.418, 0.086),
+    (0.316, 0.051),
+    (0.408, 0.067),
+    (0.342, 0.074),
+    (0.326, 0.053),
+]
+
+
+@pytest.mark.parametrize("open_eye,blink_floor", MEASURED_SUBJECTS)
+def test_real_measured_blinks_are_detected(open_eye, blink_floor):
+    """Every subject measured must be able to blink their way through."""
+    session = LivenessSession("real", [ChallengeStep(ActionType.BLINK, count=2)])
+
+    feed(session, eyes_open_baseline(open_eye))
+    for _ in range(2):
+        feed(session, [geometry(ear=blink_floor)] * settings.ear_consec_frames)
+        feed(session, [geometry(ear=open_eye)] * 2)
+
+    assert session.status is LivenessStatus.PASSED, (
+        f"a real blink to {blink_floor} was missed for an open eye of {open_eye}"
+    )
+
+
+@pytest.mark.parametrize("open_eye,blink_floor", MEASURED_SUBJECTS)
+def test_an_open_eye_is_never_read_as_closed(open_eye, blink_floor):
+    """The other half: resting eyes must not drift under the threshold."""
+    session = LivenessSession("open", [ChallengeStep(ActionType.BLINK, count=1)])
+
+    # Resting EAR wanders a little frame to frame; none of it is a blink.
+    feed(session, eyes_open_baseline(open_eye))
+    feed(session, [geometry(ear=open_eye * jitter) for jitter in (1.0, 0.92, 0.97, 0.88)] * 6)
+
+    assert session.signals.blinks_detected == 0
+
+
+def test_the_threshold_adapts_to_the_person():
+    """A narrow-eyed subject's blink would sit above a wide-eyed one's floor.
+
+    Subject 2 blinks to 0.051 with an open eye of 0.316. Subject 1 blinks to
+    0.086 with an open eye of 0.418. A single threshold set for either one
+    misjudges the other, which is what scaling to the individual avoids.
+    """
+    thresholds = []
+    for open_eye, _ in MEASURED_SUBJECTS:
+        session = LivenessSession("t", [ChallengeStep(ActionType.BLINK, count=1)])
+        feed(session, eyes_open_baseline(open_eye))
+        thresholds.append(session._blink_threshold())
+
+    assert max(thresholds) - min(thresholds) > 0.04, "threshold did not adapt"
+    for threshold, (open_eye, blink_floor) in zip(thresholds, MEASURED_SUBJECTS):
+        assert blink_floor < threshold < open_eye
+
+
+def test_a_blink_during_baseline_does_not_raise_the_bar():
+    """The baseline takes the maximum, not the mean.
+
+    A mean would be dragged down by a blink landing in the baseline window,
+    lowering the threshold and making every later blink harder to register.
+    """
+    session = LivenessSession("bl", [ChallengeStep(ActionType.BLINK, count=1)])
+
+    window = [geometry(ear=EYES_OPEN)] * settings.ear_baseline_frames
+    window[2] = geometry(ear=EYES_SHUT)
+    window[3] = geometry(ear=EYES_SHUT)
+    feed(session, window)
+
+    assert session.signals.ear_open_baseline == pytest.approx(EYES_OPEN)
+
+
+def test_the_open_eye_baseline_survives_into_later_steps():
+    """Eye shape does not change between steps; re-measuring only costs frames."""
+    session = LivenessSession(
+        "carry",
+        [ChallengeStep(ActionType.BLINK, count=1), ChallengeStep(ActionType.BLINK, count=1)],
+    )
+    feed(session, blink_frames(1))
+    assert session.step_index == 1
+
+    measured = session.signals.ear_open_baseline
+
+    # No fresh baseline window — the second step blinks immediately.
+    feed(session, [geometry(ear=EYES_SHUT)] * settings.ear_consec_frames)
+    feed(session, [geometry(ear=EYES_OPEN)] * 2)
+
+    assert session.status is LivenessStatus.PASSED
+    assert session.signals.ear_open_baseline == measured
+
+
 def test_a_turned_head_does_not_manufacture_blinks():
     """The bug a real webcam session exposed.
 
@@ -150,10 +247,25 @@ def test_a_blink_still_counts_at_a_normal_head_angle():
     slight = 0.5 + 0.05
     session = LivenessSession("slight", [ChallengeStep(ActionType.BLINK, count=1)])
 
+    feed(session, [geometry(ear=EYES_OPEN, yaw=slight)] * settings.ear_baseline_frames)
     closed = [geometry(ear=EYES_SHUT, yaw=slight)] * settings.ear_consec_frames
     feed(session, closed + [geometry(ear=EYES_OPEN, yaw=slight)] * 2)
 
     assert session.signals.blinks_detected == 1
+
+
+def test_no_blink_is_scored_before_the_open_eye_is_measured():
+    """The baseline window costs frames, and that has to be deliberate.
+
+    At kiosk frame rates it is under half a second — less time than it takes to
+    read the prompt — so a user who blinks on cue is not caught out by it.
+    """
+    session = LivenessSession("early", [ChallengeStep(ActionType.BLINK, count=1)])
+
+    feed(session, [geometry(ear=EYES_SHUT)] * 2 + [geometry(ear=EYES_OPEN)] * 2)
+
+    assert session.signals.blinks_detected == 0
+    assert session.signals.ear_open_baseline is None
 
 
 def test_a_closure_interrupted_by_a_head_turn_is_not_a_blink():

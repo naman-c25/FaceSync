@@ -45,6 +45,32 @@ file, which is what you want when sweeping values:
 FACEPAY_MATCH_THRESHOLD=0.52 FACEPAY_EAR_THRESHOLD=0.19 python app.py
 ```
 
+### Measured EAR across five people
+
+| open eye | blink floor | floor as % of open |
+|---|---|---|
+| 0.418 | 0.086 | 21% |
+| 0.316 | 0.051 | 16% |
+| 0.408 | 0.067 | 16% |
+| 0.342 | 0.074 | 22% |
+| 0.326 | 0.053 | 16% |
+
+Open-eye EAR spans 0.316 to 0.418 — a 32% spread — while the *ratio* of blink
+floor to open eye holds between 16% and 22%. That is why blinks are scored
+against `ear_closed_fraction` of each person's own measured open eye rather
+than a fixed number: the ratio transfers between people, the absolute value
+does not.
+
+Being precise about what that buys: across these five, a fixed threshold of
+0.20 would have given the same worst-case margin (0.114). What the relative
+threshold improves is the *balance* — margin imbalance drops from 0.102 to
+0.046, so it stops favouring wide-eyed subjects. The bigger gain is outside the
+sampled range: someone with an open eye of 0.25 gets 0.05 of headroom under a
+fixed 0.20 and 0.11 under the relative rule.
+
+These five subjects are baked into `test_liveness.py` as parametrised cases, so
+a future change to the blink logic has to keep working for all of them.
+
 ### A first calibration data point
 
 Running the pipeline over the six-person group photo bundled with InsightFace

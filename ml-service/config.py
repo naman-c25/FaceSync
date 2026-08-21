@@ -40,10 +40,27 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Liveness — blink detection (EAR)
     # ------------------------------------------------------------------
-    # Eye Aspect Ratio drops sharply during a blink. Open eyes sit around
-    # 0.28-0.35; a closed eye falls under 0.20. Tune per-person if needed —
-    # people with narrow eyes may need this lowered.
-    ear_threshold: float = 0.21
+    # A blink is scored against a fraction of *this person's* own open-eye EAR,
+    # not a fixed number. Measured across five people, open-eye EAR ranged from
+    # 0.316 to 0.418 — a 32% spread, wide enough that one global threshold is
+    # either too high for narrow eyes or too low for wide ones.
+    #
+    # What held steady was the ratio: every blink floor landed at 16-22% of
+    # that same person's open value (0.086/0.418, 0.051/0.316, 0.067/0.408,
+    # 0.074/0.342, 0.053/0.326). So 0.55 sits comfortably below every open eye
+    # and far above every blink floor, for all of them.
+    ear_closed_fraction: float = 0.55
+
+    # Frames used to measure the open-eye value at the start of a blink step.
+    # The *maximum* over the window is taken, not the mean: a blink during the
+    # window would drag a mean down and quietly raise the bar for every blink
+    # after it, while the max still reports the open eye.
+    ear_baseline_frames: int = 8
+
+    # Fallback for before a baseline exists. Set from the same five sessions:
+    # above every blink floor seen (max 0.086) and below every open eye (min
+    # 0.316), sitting roughly midway.
+    ear_threshold: float = 0.20
 
     # EAR divides eyelid height by the eye's corner-to-corner width, and that
     # width foreshortens as the head turns while the height barely does. Near
@@ -81,13 +98,20 @@ class Settings(BaseSettings):
     #
     # Both are measured against a baseline captured at the start of each step.
 
-    # How far the iris must travel along the eye, as a fraction of eye width.
-    gaze_delta: float = 0.08
+    # Both are sized from the weakest direction any of five test subjects could
+    # reach, not from their best. People turn much further one way than the
+    # other — one subject moved -0.395 but only +0.090 in yaw — and a threshold
+    # built from the strong side is unreachable on the weak one.
+    #
+    # Weakest reachable across those subjects: gaze 0.071, yaw 0.090. These sit
+    # at roughly 70% of that, and a step passes on gaze *or* yaw, so a subject
+    # only has to clear one of them.
 
-    # How far the head must turn. Smaller than the gaze delta because the yaw
-    # ratio compresses — the nose stays between the face edges however far the
-    # head turns, so its full range is narrower than the iris's.
-    yaw_delta: float = 0.05
+    # How far the iris must travel along the eye, as a fraction of eye width.
+    gaze_delta: float = 0.05
+
+    # How far the head must turn.
+    yaw_delta: float = 0.06
 
     # Frames averaged at the start of a step to establish that rest position.
     # Averaging rather than taking one frame keeps landmark jitter out of the

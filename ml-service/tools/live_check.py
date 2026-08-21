@@ -57,6 +57,24 @@ GREEN, RED, AMBER, WHITE = (0, 220, 0), (0, 0, 255), (0, 190, 255), (240, 240, 2
 
 BASELINE_FRAMES = 30
 
+# Scales a median absolute deviation to the standard deviation it would imply
+# for normally distributed data, so the number stays comparable to one.
+MAD_TO_SIGMA = 1.4826
+
+
+def robust_spread(samples: list[float]) -> float:
+    """Median absolute deviation, scaled to be read like a standard deviation.
+
+    Unlike a standard deviation this ignores a handful of frames where the
+    subject drifted, reporting the jitter of the frames they *did* hold still
+    for rather than the size of their drift.
+    """
+    if len(samples) < 2:
+        return 0.0
+
+    centre = statistics.median(samples)
+    return MAD_TO_SIGMA * statistics.median([abs(s - centre) for s in samples])
+
 
 class Readings:
     """Rest position plus running extremes.
@@ -101,10 +119,16 @@ class Readings:
                 self._samples.setdefault(name, []).append(value)
 
         if self.calibrating and self.calibration_progress() >= 1.0:
-            self.baseline = {name: sum(s) / len(s) for name, s in self._samples.items()}
+            # Median and MAD rather than mean and standard deviation. People
+            # drift during calibration, and a mean follows the drift while a
+            # standard deviation reports it as sensor noise — which is how a
+            # subject who moved ended up with 14x the jitter of one who sat
+            # still, and a suggested threshold they could never reach.
+            self.baseline = {
+                name: statistics.median(s) for name, s in self._samples.items()
+            }
             self.rest_noise = {
-                name: statistics.pstdev(s) if len(s) > 1 else 0.0
-                for name, s in self._samples.items()
+                name: robust_spread(s) for name, s in self._samples.items()
             }
 
     def calibration_progress(self) -> float:
@@ -364,11 +388,29 @@ def suggest(readings: Readings) -> None:
             "  Re-run and blink deliberately several times."
         )
     elif ear:
-        # Halfway between the blink floor and the resting open value.
+        # Blinks are scored against a fraction of each person's own open eye,
+        # so what matters is the ratio, not the absolute floor. Reported as a
+        # check on the configured fraction rather than a value to copy across.
+        floor, open_eye = ear
+        ratio = floor / open_eye if open_eye else 1.0
+        headroom = settings.ear_closed_fraction - ratio
+
         print(
-            f"  ear_threshold = {(ear[0] + ear[1]) / 2:.2f}"
-            f"      (blink floor {ear[0]:.3f}, open {ear[1]:.3f})"
+            f"  EAR floor {floor:.3f}, open {open_eye:.3f}"
+            f"  -> blink reached {ratio:.0%} of open"
         )
+        if headroom < 0.15:
+            print(
+                f"  WARNING: ear_closed_fraction is {settings.ear_closed_fraction},"
+                f" only {headroom:.2f} above that.\n"
+                f"    Blinks may go undetected. Consider raising it toward"
+                f" {min(0.75, ratio + 0.30):.2f}."
+            )
+        else:
+            print(
+                f"  ear_closed_fraction = {settings.ear_closed_fraction} is fine"
+                f" here ({headroom:.2f} of headroom)."
+            )
 
     for name, key, floor in (("gaze", "gaze_delta", 0.03), ("yaw", "yaw_delta", 0.02)):
         span = readings.shift_span(name)
@@ -386,19 +428,31 @@ def suggest(readings: Readings) -> None:
             )
             continue
 
-        # The threshold has to clear the jitter you produce sitting still, and
-        # sit well under what you can actually reach. Four standard deviations
-        # of rest noise is the floor; 40% of the weaker direction is the
-        # target. Taking the weaker direction matters — a threshold sized on a
-        # big left turn would be unreachable to the right. 40% rather than 60%
-        # because calibration movements are deliberate and kiosk ones are not.
-        noise_floor = 4.0 * readings.rest_noise.get(name, 0.0)
-        suggested = max(0.4 * reachable, noise_floor)
+        # A usable threshold has to sit above the jitter you produce sitting
+        # still and below what you can reach in your weaker direction. 40% of
+        # reachable is the target — deliberate calibration movements are bigger
+        # than casual kiosk ones — and four times the rest jitter is the floor.
+        jitter = readings.rest_noise.get(name, 0.0)
+        noise_floor = 4.0 * jitter
+        target = 0.4 * reachable
 
-        note = "  <- raised to clear rest jitter" if noise_floor > 0.4 * reachable else ""
+        # When those two cross there is no good answer, and printing the larger
+        # one produces a threshold the subject demonstrably cannot reach. Say
+        # so instead: it means calibration caught movement, not noise.
+        if noise_floor > target:
+            print(
+                f"{name.upper()}: rest jitter {jitter:.3f} is high next to the"
+                f" {reachable:.3f} you reached in the weaker direction.\n"
+                f"  That usually means you moved while calibrating rather than"
+                f" real sensor noise.\n"
+                f"  Press 'r', hold still until it finishes, then move — and"
+                f" ignore any {key} from this run."
+            )
+            continue
+
         print(
-            f"  {key:<13} = {suggested:.2f}      (moved {low:+.3f}..{high:+.3f},"
-            f" jitter {readings.rest_noise.get(name, 0.0):.3f}){note}"
+            f"  {key:<13} = {target:.2f}      (moved {low:+.3f}..{high:+.3f},"
+            f" jitter {jitter:.3f})"
         )
 
     print("=" * 60)

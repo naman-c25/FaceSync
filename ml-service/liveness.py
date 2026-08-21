@@ -94,6 +94,8 @@ class LivenessSignals:
     blinks_detected: int = 0
     ear_min: float | None = None
     ear_max: float | None = None
+    ear_open_baseline: float | None = None
+    ear_threshold_used: float | None = None
     gaze_min: float | None = None
     gaze_max: float | None = None
     yaw_min: float | None = None
@@ -159,6 +161,8 @@ class LivenessSession:
         self._gaze_hold_run = 0
         self._baseline: tuple[float, float] | None = None
         self._baseline_samples: list[tuple[float, float]] = []
+        self._ear_open: float | None = None
+        self._ear_baseline_samples: list[float] = []
         self._nose_track: list[np.ndarray] = []
 
     # -- public API ----------------------------------------------------
@@ -244,6 +248,21 @@ class LivenessSession:
 
     # -- per-action progress -------------------------------------------
 
+    def _blink_threshold(self) -> float:
+        """The EAR below which this person's eye counts as closed.
+
+        Scaled to their own open-eye value once it has been measured. Eye shape
+        varies enough between people that a fixed number is either unreachable
+        for narrow eyes or trivially crossed by wide ones — but the *ratio* of
+        blink floor to open eye is nearly constant, so scaling transfers where
+        a constant does not.
+
+        Falls back to the fixed threshold until the baseline exists.
+        """
+        if self._ear_open is None:
+            return settings.ear_threshold
+        return settings.ear_closed_fraction * self._ear_open
+
     def _advance_blink(self, step: ChallengeStep, geometry: FaceGeometry) -> bool:
         """Count blinks by watching EAR fall and come back up.
 
@@ -265,7 +284,17 @@ class LivenessSession:
             self.signals.frames_ear_unusable += 1
             return False
 
-        if geometry.ear < settings.ear_threshold:
+        if self._ear_open is None:
+            self._ear_baseline_samples.append(geometry.ear)
+            if len(self._ear_baseline_samples) < settings.ear_baseline_frames:
+                return False
+
+            self._ear_open = max(self._ear_baseline_samples)
+            self.signals.ear_open_baseline = round(self._ear_open, 4)
+            self.signals.ear_threshold_used = round(self._blink_threshold(), 4)
+            return False
+
+        if geometry.ear < self._blink_threshold():
             self._eyes_closed_run += 1
             return False
 
@@ -346,6 +375,10 @@ class LivenessSession:
         # certainly left the head somewhere other than where it started.
         self._baseline = None
         self._baseline_samples = []
+
+        # The open-eye baseline deliberately survives. Unlike head position, a
+        # person's eye shape does not change between steps, so re-measuring it
+        # would only cost frames and risk landing on a blink.
 
         if self.step_index >= len(self.challenge):
             self._finish(LivenessStatus.PASSED)
