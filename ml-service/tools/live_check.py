@@ -70,13 +70,45 @@ def draw(frame, lines: list[tuple[str, tuple[int, int, int]]]) -> None:
         cv2.putText(frame, text, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 1)
 
 
+def open_camera(index: int = 0):
+    """Open the webcam, preferring the backend that starts quickly.
+
+    On Windows the default MSMF backend routinely takes ten seconds or more to
+    open a camera, and reports `isOpened()` before it can actually deliver a
+    frame — so this also pulls one frame to confirm the device really works.
+    """
+    backends = (
+        [(cv2.CAP_DSHOW, "DirectShow"), (cv2.CAP_ANY, "default")]
+        if sys.platform == "win32"
+        else [(cv2.CAP_ANY, "default")]
+    )
+
+    for backend, name in backends:
+        camera = cv2.VideoCapture(index, backend)
+        if camera.isOpened() and camera.read()[0]:
+            print(f"camera ready via {name}", flush=True)
+            return camera
+        camera.release()
+
+    return None
+
+
 def main() -> int:
-    camera = cv2.VideoCapture(0)
-    if not camera.isOpened():
+    print(__doc__)
+
+    # Load before touching the camera. The model takes a second or two, and
+    # doing it inside the loop means the window does not appear until after it
+    # finishes — which looks exactly like a hang.
+    print("loading face mesh model...", flush=True)
+    face_detection.warm_up()
+
+    print("opening camera...", flush=True)
+    camera = open_camera()
+    if camera is None:
         print("Could not open the webcam. Is another application using it?")
         return 1
 
-    print(__doc__)
+    print("press 'c' to run a challenge, 'r' to reset, 'q' to quit", flush=True)
     readings = Readings()
     session: LivenessSession | None = None
 

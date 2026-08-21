@@ -41,7 +41,15 @@ IMG_RIGHT_IRIS_CENTRE = 473
 # ever returns the bare 468, gaze silently becomes nonsense, so we check.
 LANDMARKS_WITH_IRIS = 478
 
-_detector_lock = threading.Lock()
+# Two separate locks, deliberately.
+#
+# `_load_lock` guards the one-time construction of the detector; `_infer_lock`
+# serialises calls into it. A single lock covering both would deadlock, because
+# `analyse` would be holding it while `_get_detector` tried to take it again —
+# and `threading.Lock` is not reentrant. Splitting them also means a slow model
+# load does not sit inside the lock that every inference call needs.
+_load_lock = threading.Lock()
+_infer_lock = threading.Lock()
 _detector = None
 
 
@@ -61,7 +69,7 @@ def _get_detector():
     """Create the FaceLandmarker once, on first use."""
     global _detector
     if _detector is None:
-        with _detector_lock:
+        with _load_lock:
             if _detector is None:
                 if not MODEL_PATH.exists():
                     raise FileNotFoundError(
@@ -136,13 +144,16 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
     """Extract EAR and gaze from a frame, or None if no face was found."""
     import mediapipe as mp
 
+    # Resolved before the inference lock is taken — see the note on the locks.
+    detector = _get_detector()
+
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
     # MediaPipe's detector is not documented as thread-safe, and FastAPI will
     # happily call this from several worker threads at once.
-    with _detector_lock:
-        result = _get_detector().detect(image)
+    with _infer_lock:
+        result = detector.detect(image)
 
     if not result.face_landmarks:
         return None
