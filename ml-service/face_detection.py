@@ -37,6 +37,12 @@ IMG_RIGHT_EYE_VERTICAL = ((385, 380), (387, 373))
 IMG_RIGHT_EYE_LID = (386, 374)
 IMG_RIGHT_IRIS_CENTRE = 473
 
+# Outermost points of the face oval, used with the nose tip to estimate how far
+# the head is turned. Named by image side, as above.
+IMG_LEFT_FACE_EDGE = 234
+IMG_RIGHT_FACE_EDGE = 454
+NOSE_TIP = 1
+
 # The iris ring only exists in the refined 478-point output. If a model bundle
 # ever returns the bare 468, gaze silently becomes nonsense, so we check.
 LANDMARKS_WITH_IRIS = 478
@@ -63,6 +69,7 @@ class FaceGeometry:
     ear_right: float
     gaze_horizontal: float  # 0.0 = image-left, 0.5 = centre, 1.0 = image-right
     gaze_vertical: float  # 0.0 = image-top, 1.0 = image-bottom
+    head_yaw: float  # 0.5 = square to camera, rises as the head turns image-right
 
 
 def _get_detector():
@@ -140,6 +147,28 @@ def _axis_ratio(points: np.ndarray, iris: int, start: int, end: int) -> float:
     return float(np.clip((offset @ axis) / length_squared, 0.0, 1.0))
 
 
+def head_yaw_ratio(points: np.ndarray) -> float:
+    """How far the head is turned, as 0.0-1.0 with 0.5 square to the camera.
+
+    Compares the nose tip's distance to each edge of the face oval. Turning the
+    head toward the camera's right brings the nose closer to that edge, pushing
+    the ratio up — the same direction convention as `gaze_horizontal`, so both
+    signals can be tested against a prompt without a second sign convention to
+    get wrong.
+
+    Perspective does the work here: as the head rotates, the far side of the
+    face foreshortens while the near side does not.
+    """
+    nose = points[NOSE_TIP]
+    to_left = float(np.linalg.norm(nose - points[IMG_LEFT_FACE_EDGE]))
+    to_right = float(np.linalg.norm(nose - points[IMG_RIGHT_FACE_EDGE]))
+
+    span = to_left + to_right
+    if span == 0:
+        return 0.5
+    return to_left / span
+
+
 def analyse(bgr: np.ndarray) -> FaceGeometry | None:
     """Extract EAR and gaze from a frame, or None if no face was found."""
     import mediapipe as mp
@@ -189,8 +218,11 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
     # the axis already runs left-to-right across the image. A mirrored frame
     # reverses that, and flipping the ratio here keeps every downstream
     # comparison written in image-space terms.
+    yaw = head_yaw_ratio(points)
+
     if settings.frames_are_mirrored:
         gaze_h = 1.0 - gaze_h
+        yaw = 1.0 - yaw
 
     return FaceGeometry(
         landmarks=points,
@@ -199,4 +231,5 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
         ear_right=round(ear_right, 4),
         gaze_horizontal=round(gaze_h, 4),
         gaze_vertical=round(gaze_v, 4),
+        head_yaw=round(yaw, 4),
     )

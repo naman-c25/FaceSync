@@ -33,9 +33,10 @@ perfectly normally.
 python tools/live_check.py
 ```
 
-This shows every signal live off your webcam. Blink a few times and note where
-EAR bottoms out; look hard left and right and note the gaze extremes. Set the
-thresholds between the observed values, not at the defaults.
+This shows every signal live off your webcam. It spends a second learning your
+rest position, then reports everything as movement away from it — the same way
+liveness scores it. Blink deliberately, turn your head both ways, then move
+just your eyes. Quitting prints thresholds derived from what you actually did.
 
 Any setting can also be overridden by environment variable without editing the
 file, which is what you want when sweeping values:
@@ -122,6 +123,22 @@ interface that moving it to Redis later touches only that file.
 **Liveness runs before recognition.** Per frame, only MediaPipe runs (~5-20ms).
 ArcFace runs once, after liveness passes. A spoof attempt never reaches the
 expensive stage.
+
+**A look step scores movement, not position.** This is a security property
+rather than a refinement. People hold their heads at all sorts of resting
+angles, so any absolute threshold loose enough to accept them is also satisfied
+by a still photo of someone whose head happens to be turned that way — the
+photo sits permanently past the threshold. Each step captures a baseline over
+its first few frames and requires the signal to move away from it, which a
+fixed pose cannot do. An API test caught exactly this: a cropped face from a
+group photo passed a look step until the check became relative.
+
+**Eyes or head, either one.** Told to "look left", some people swivel their
+eyes and others turn their head — and a head turn keeps the iris centred
+between the eye corners, so the gaze ratio barely moves. Scoring only eye
+movement would reject customers who did exactly what was asked, so
+`head_yaw` (nose position between the face edges) is accepted as an
+alternative.
 
 **The matched frame is not the frame liveness finished on.** Liveness completes
 on whichever frame satisfies the last action — very likely one where the user

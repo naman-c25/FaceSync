@@ -24,11 +24,10 @@ from enum import Enum
 import numpy as np
 
 from config import settings
-from face_detection import FaceGeometry
 
-# Nose tip in MediaPipe's canonical mesh — a stable point for tracking whether
-# the head moves at all across a session.
-NOSE_TIP = 1
+# NOSE_TIP is a stable point for tracking whether the head moves at all across
+# a session. It lives in face_detection with the other landmark indices.
+from face_detection import NOSE_TIP, FaceGeometry
 
 
 class ActionType(str, Enum):
@@ -96,6 +95,8 @@ class LivenessSignals:
     ear_max: float | None = None
     gaze_min: float | None = None
     gaze_max: float | None = None
+    yaw_min: float | None = None
+    yaw_max: float | None = None
     head_motion_px: float = 0.0
     elapsed_seconds: float = 0.0
 
@@ -155,6 +156,8 @@ class LivenessSession:
         self._eyes_closed_run = 0
         self._blinks_this_step = 0
         self._gaze_hold_run = 0
+        self._baseline: tuple[float, float] | None = None
+        self._baseline_samples: list[tuple[float, float]] = []
         self._nose_track: list[np.ndarray] = []
 
     # -- public API ----------------------------------------------------
@@ -226,10 +229,13 @@ class LivenessSession:
         self.signals.frames_without_face += 1
         self._consecutive_missing += 1
 
-        # A gap resets gaze progress: a "hold" interrupted by the face
-        # vanishing is not a hold, and letting it accumulate across the gap
-        # would let someone swap what is in front of the lens mid-step.
+        # A gap resets the step's progress *and* its baseline: a "hold"
+        # interrupted by the face vanishing is not a hold, and a rest position
+        # measured before the gap says nothing about whatever is in front of
+        # the lens after it.
         self._gaze_hold_run = 0
+        self._baseline = None
+        self._baseline_samples = []
 
         if self._consecutive_missing >= settings.max_consecutive_missing_face:
             self._finish(LivenessStatus.FAILED, "face_lost")
@@ -263,18 +269,55 @@ class LivenessSession:
         return self._blinks_this_step >= step.count
 
     def _advance_gaze(self, step: ChallengeStep, geometry: FaceGeometry) -> bool:
-        """Require the gaze to be held for several consecutive frames.
+        """Score a look step on movement away from the rest position.
 
-        A single frame past the threshold is as likely to be landmark jitter or
-        a glance at something in the shop as it is a response to the prompt.
+        The first few frames of the step establish where this person's head and
+        eyes sit at rest. After that, either signal can satisfy the step:
+
+        - the eyes swivel, or
+        - the head turns.
+
+        Both are accepted because told to "look left" some people move their
+        eyes and others turn their head, and a head turn leaves the iris
+        centred between the eye corners — so the gaze ratio barely moves.
+        Demanding eye movement alone would reject people who did exactly what
+        the prompt asked.
+
+        Measuring movement rather than absolute position is what keeps a still
+        photo from satisfying this. Someone photographed with their head turned
+        sits permanently past any absolute threshold; what they cannot do is
+        turn further on cue. (Physically rotating a printed photo mid-challenge
+        would move the yaw — but a challenge sequence also contains a blink
+        step, which no photo answers.)
+
+        A single frame past the delta is as likely to be landmark jitter, or a
+        glance at something in the shop, as a response to the prompt — hence
+        the hold.
         """
+        if self._baseline is None:
+            self._baseline_samples.append((geometry.gaze_horizontal, geometry.head_yaw))
+            if len(self._baseline_samples) < settings.baseline_frames:
+                return False
+
+            count = len(self._baseline_samples)
+            self._baseline = (
+                sum(g for g, _ in self._baseline_samples) / count,
+                sum(y for _, y in self._baseline_samples) / count,
+            )
+            return False
+
+        gaze_rest, yaw_rest = self._baseline
+        gaze_shift = geometry.gaze_horizontal - gaze_rest
+        yaw_shift = geometry.head_yaw - yaw_rest
+
+        # LOOK_LEFT is the user's left, which is the image's right, so both
+        # signals shift upward. GAZE_LEFT_IS_HIGH_RATIO records that mapping.
         looking_left = step.action is ActionType.LOOK_LEFT
-        wants_high_ratio = looking_left == GAZE_LEFT_IS_HIGH_RATIO
+        if looking_left != GAZE_LEFT_IS_HIGH_RATIO:
+            gaze_shift, yaw_shift = -gaze_shift, -yaw_shift
 
         satisfied = (
-            geometry.gaze_horizontal >= settings.gaze_ratio_high
-            if wants_high_ratio
-            else geometry.gaze_horizontal <= settings.gaze_ratio_low
+            gaze_shift >= settings.gaze_delta or yaw_shift >= settings.yaw_delta
         )
 
         self._gaze_hold_run = self._gaze_hold_run + 1 if satisfied else 0
@@ -286,6 +329,11 @@ class LivenessSession:
         self._gaze_hold_run = 0
         self._eyes_closed_run = 0
 
+        # Each step re-measures rest, because the previous step almost
+        # certainly left the head somewhere other than where it started.
+        self._baseline = None
+        self._baseline_samples = []
+
         if self.step_index >= len(self.challenge):
             self._finish(LivenessStatus.PASSED)
 
@@ -293,22 +341,15 @@ class LivenessSession:
 
     def _record_signals(self, geometry: FaceGeometry) -> None:
         signals = self.signals
-        signals.ear_min = (
-            geometry.ear if signals.ear_min is None else min(signals.ear_min, geometry.ear)
-        )
-        signals.ear_max = (
-            geometry.ear if signals.ear_max is None else max(signals.ear_max, geometry.ear)
-        )
-        signals.gaze_min = (
-            geometry.gaze_horizontal
-            if signals.gaze_min is None
-            else min(signals.gaze_min, geometry.gaze_horizontal)
-        )
-        signals.gaze_max = (
-            geometry.gaze_horizontal
-            if signals.gaze_max is None
-            else max(signals.gaze_max, geometry.gaze_horizontal)
-        )
+
+        for name, value in (
+            ("ear", geometry.ear),
+            ("gaze", geometry.gaze_horizontal),
+            ("yaw", geometry.head_yaw),
+        ):
+            low, high = getattr(signals, f"{name}_min"), getattr(signals, f"{name}_max")
+            setattr(signals, f"{name}_min", value if low is None else min(low, value))
+            setattr(signals, f"{name}_max", value if high is None else max(high, value))
 
         # Total drift of the nose tip. A live head is never perfectly still, so
         # a near-zero figure suggests something rigid in front of the lens.

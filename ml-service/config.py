@@ -58,16 +58,27 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Liveness — gaze challenge
     # ------------------------------------------------------------------
-    # Iris centre position along the eye's corner-to-corner axis, normalised so
-    # 0.0 sits at the image-left corner and 1.0 at the image-right corner.
-    # Looking straight ahead lands near 0.5.
+    # A look step is scored on *movement away from rest*, not on absolute
+    # position. That distinction is a security property, not a refinement:
+    # people hold their head at all sorts of resting angles, so any absolute
+    # threshold loose enough to accept them is also satisfied by a still photo
+    # of someone whose head happens to be turned that way. A photo cannot
+    # change its pose mid-challenge; a live person can.
     #
-    # These are named by image direction, not by the user's left and right, so
-    # that the mapping from "look left" to an expected ratio lives in exactly
-    # one place (liveness.EXPECTED_GAZE) instead of being smeared across the
-    # thresholds as well.
-    gaze_ratio_low: float = 0.38
-    gaze_ratio_high: float = 0.62
+    # Both are measured against a baseline captured at the start of each step.
+
+    # How far the iris must travel along the eye, as a fraction of eye width.
+    gaze_delta: float = 0.08
+
+    # How far the head must turn. Smaller than the gaze delta because the yaw
+    # ratio compresses — the nose stays between the face edges however far the
+    # head turns, so its full range is narrower than the iris's.
+    yaw_delta: float = 0.05
+
+    # Frames averaged at the start of a step to establish that rest position.
+    # Averaging rather than taking one frame keeps landmark jitter out of the
+    # baseline, which would otherwise offset every comparison that follows.
+    baseline_frames: int = 3
 
     # Set true only if the frontend sends a horizontally flipped frame.
     # getUserMedia delivers an unmirrored frame and a CSS scaleX(-1) preview

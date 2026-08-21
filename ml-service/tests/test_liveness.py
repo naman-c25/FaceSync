@@ -26,10 +26,15 @@ from liveness import (
 EYES_OPEN = 0.31
 EYES_SHUT = 0.12
 GAZE_CENTRE = 0.50
+HEAD_SQUARE = 0.50
 
 
-def geometry(ear: float = EYES_OPEN, gaze: float = GAZE_CENTRE) -> FaceGeometry:
-    """A synthetic frame. Landmarks are noise — only EAR and gaze are read."""
+def geometry(
+    ear: float = EYES_OPEN,
+    gaze: float = GAZE_CENTRE,
+    yaw: float = HEAD_SQUARE,
+) -> FaceGeometry:
+    """A synthetic frame. Landmarks are noise — only the scalars are read."""
     return FaceGeometry(
         landmarks=np.zeros((478, 2), dtype=np.float32),
         ear=ear,
@@ -37,6 +42,7 @@ def geometry(ear: float = EYES_OPEN, gaze: float = GAZE_CENTRE) -> FaceGeometry:
         ear_right=ear,
         gaze_horizontal=gaze,
         gaze_vertical=0.5,
+        head_yaw=yaw,
     )
 
 
@@ -52,9 +58,26 @@ def blink_frames(count: int) -> list[FaceGeometry]:
     return (closed + opened) * count
 
 
-def gaze_frames(ratio: float, count: int | None = None) -> list[FaceGeometry]:
+def at_rest(count: int | None = None) -> list[FaceGeometry]:
+    """Frames the step uses to learn where this person sits at rest."""
+    count = settings.baseline_frames if count is None else count
+    return [geometry()] * count
+
+
+def eye_move_frames(shift: float, count: int | None = None) -> list[FaceGeometry]:
+    """Rest, then the eyes swivel by `shift` from it."""
     count = settings.gaze_hold_frames if count is None else count
-    return [geometry(gaze=ratio)] * count
+    return at_rest() + [geometry(gaze=GAZE_CENTRE + shift)] * count
+
+
+def head_turn_frames(shift: float, count: int | None = None) -> list[FaceGeometry]:
+    """Rest, then the head turns by `shift` with the eyes staying centred.
+
+    This is what a head turn looks like to the mesh: the iris keeps its
+    position between the eye corners, so the gaze ratio does not move at all.
+    """
+    count = settings.gaze_hold_frames if count is None else count
+    return at_rest() + [geometry(gaze=GAZE_CENTRE, yaw=HEAD_SQUARE + shift)] * count
 
 
 # -- blink counting ----------------------------------------------------
@@ -98,35 +121,76 @@ def test_eyes_held_shut_never_counts_as_a_blink():
 # -- gaze challenge ----------------------------------------------------
 
 
-def test_look_left_passes_on_high_ratio():
+def test_look_left_passes_when_the_eyes_move():
     """The subject's left sits at higher x in an unmirrored frame."""
     session = LivenessSession("s5", [ChallengeStep(ActionType.LOOK_LEFT)])
-    feed(session, gaze_frames(settings.gaze_ratio_high + 0.05))
+    feed(session, eye_move_frames(+settings.gaze_delta - 0.01))
+    assert session.status is LivenessStatus.IN_PROGRESS, "just short must not pass"
 
+    session = LivenessSession("s5a", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, eye_move_frames(+settings.gaze_delta + 0.02))
     assert session.status is LivenessStatus.PASSED
 
 
 def test_look_left_is_not_satisfied_by_looking_right():
     """The direction mapping must not be symmetric — this catches an inversion."""
     session = LivenessSession("s6", [ChallengeStep(ActionType.LOOK_LEFT)])
-    feed(session, gaze_frames(settings.gaze_ratio_low - 0.05, count=20))
+    feed(session, eye_move_frames(-settings.gaze_delta - 0.05, count=20))
 
     assert session.status is LivenessStatus.IN_PROGRESS
 
 
-def test_look_right_passes_on_low_ratio():
+def test_look_right_passes_when_the_eyes_move_the_other_way():
     session = LivenessSession("s7", [ChallengeStep(ActionType.LOOK_RIGHT)])
-    feed(session, gaze_frames(settings.gaze_ratio_low - 0.05))
+    feed(session, eye_move_frames(-settings.gaze_delta - 0.02))
 
     assert session.status is LivenessStatus.PASSED
 
 
+def test_turning_the_head_satisfies_a_look_step():
+    """Most people turn their head rather than swivel their eyes.
+
+    A head turn leaves the iris centred between the eye corners, so the gaze
+    ratio stays at rest. Requiring eye movement alone would reject someone who
+    did exactly what the prompt asked.
+    """
+    session = LivenessSession("s5b", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, head_turn_frames(+settings.yaw_delta + 0.02))
+
+    assert session.status is LivenessStatus.PASSED
+
+
+def test_turning_the_head_the_wrong_way_does_not_satisfy_a_look_step():
+    session = LivenessSession("s5c", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, head_turn_frames(-settings.yaw_delta - 0.02, count=20))
+
+    assert session.status is LivenessStatus.IN_PROGRESS
+
+
+def test_a_head_already_turned_at_rest_does_not_pass_on_its_own():
+    """The photo attack this whole design exists to stop.
+
+    Someone photographed with their head turned sits permanently past any
+    absolute threshold. Scoring movement from a per-step baseline means that
+    fixed offset counts for nothing — the pose has to *change* on cue.
+    """
+    for offset in (+0.25, -0.25):
+        session = LivenessSession("s5d", [ChallengeStep(ActionType.LOOK_LEFT)])
+        turned = geometry(gaze=GAZE_CENTRE + offset, yaw=HEAD_SQUARE + offset)
+        feed(session, [turned] * 40)
+
+        assert session.status is LivenessStatus.IN_PROGRESS, (
+            f"a fixed pose offset by {offset} satisfied a look step"
+        )
+
+
 def test_gaze_must_be_held_not_just_touched():
     session = LivenessSession("s8", [ChallengeStep(ActionType.LOOK_LEFT)])
-    held = settings.gaze_ratio_high + 0.05
+    moved = geometry(gaze=GAZE_CENTRE + settings.gaze_delta + 0.05)
 
-    # Alternate past-threshold and centred frames so the run never accumulates.
-    feed(session, [geometry(gaze=held), geometry(gaze=GAZE_CENTRE)] * 10)
+    feed(session, at_rest())
+    # Alternate moved and resting frames so the run never accumulates.
+    feed(session, [moved, geometry()] * 10)
 
     assert session.status is LivenessStatus.IN_PROGRESS
 
@@ -134,11 +198,13 @@ def test_gaze_must_be_held_not_just_touched():
 def test_losing_the_face_resets_gaze_progress():
     """Progress must not survive a gap the attacker could swap something into."""
     session = LivenessSession("s9", [ChallengeStep(ActionType.LOOK_LEFT)])
-    held = settings.gaze_ratio_high + 0.05
+    moved = [geometry(gaze=GAZE_CENTRE + settings.gaze_delta + 0.05)] * (
+        settings.gaze_hold_frames - 1
+    )
 
-    feed(session, gaze_frames(held, count=settings.gaze_hold_frames - 1))
+    feed(session, at_rest() + moved)
     feed(session, [None])
-    feed(session, gaze_frames(held, count=settings.gaze_hold_frames - 1))
+    feed(session, moved)
 
     assert session.status is LivenessStatus.IN_PROGRESS
 
@@ -195,7 +261,7 @@ def test_steps_are_completed_in_order():
     feed(session, blink_frames(1))
     assert session.step_index == 0, "blinking must not satisfy a gaze step"
 
-    feed(session, gaze_frames(settings.gaze_ratio_high + 0.05))
+    feed(session, eye_move_frames(+settings.gaze_delta + 0.02))
     assert session.step_index == 1
 
     feed(session, blink_frames(1))
