@@ -31,6 +31,7 @@ from schemas import (
     EnrollmentStartResponse,
     FrameRequest,
     HealthResponse,
+    LivenessSignalsModel,
     MatchRequest,
     MatchResponse,
     VerifyFrameResponse,
@@ -329,10 +330,20 @@ def _extract_probe(session: VerificationSession) -> None:
     session.probe_embedding = face.embedding
 
 
+def _signals(session: VerificationSession) -> LivenessSignalsModel:
+    liveness = session.liveness
+    return LivenessSignalsModel(
+        **vars(liveness.signals),
+        challenge=[step.prompt for step in liveness.challenge],
+    )
+
+
 def _verify_response(
     session: VerificationSession, *, face_detected: bool
 ) -> VerifyFrameResponse:
     outcome = session.liveness.outcome()
+    settled = outcome.status is not LivenessStatus.IN_PROGRESS
+
     return VerifyFrameResponse(
         status=outcome.status,
         prompt=outcome.prompt,
@@ -342,6 +353,8 @@ def _verify_response(
         failure_reason=outcome.failure_reason,
         face_detected=face_detected,
         ready_to_match=session.probe_embedding is not None,
+        # Only once there is a verdict — see LivenessSignalsModel.
+        signals=_signals(session) if settled else None,
     )
 
 
@@ -365,6 +378,9 @@ def verify_match(request: MatchRequest) -> MatchResponse:
     if session.probe_embedding is None:
         raise HTTPException(status_code=409, detail="no probe embedding available")
 
+    # Held before the session is discarded below, since the response returns it.
+    probe = session.probe_embedding
+
     try:
         gallery = [
             recognition.GalleryEntry(
@@ -377,11 +393,11 @@ def verify_match(request: MatchRequest) -> MatchResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     result = recognition.identify(
-        session.probe_embedding,
-        gallery,
-        threshold=request.threshold,
-        margin=request.margin,
+        probe, gallery, threshold=request.threshold, margin=request.margin
     )
+
+    # Captured before the session is discarded, since the log needs it.
+    signals = _signals(session)
 
     # One session, one identification attempt. Without this a caller could
     # retry the same probe against different thresholds until something
@@ -398,6 +414,8 @@ def verify_match(request: MatchRequest) -> MatchResponse:
         candidates=[
             CandidateModel(user_id=c.user_id, score=c.score) for c in result.candidates
         ],
+        probe_embedding_b64=recognition.encode_embedding(probe),
+        signals=signals,
     )
 
 

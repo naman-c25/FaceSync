@@ -85,6 +85,31 @@ class VerifyStartResponse(BaseModel):
     total_steps: int
 
 
+class LivenessSignalsModel(BaseModel):
+    """Everything the challenge measured, for the caller's audit log.
+
+    Returned only once a session reaches a verdict. Sending it on every frame
+    would multiply the response size across a whole capture for data nobody
+    reads until the end.
+    """
+
+    frames_processed: int
+    frames_without_face: int
+    frames_ear_unusable: int
+    blinks_detected: int
+    ear_min: float | None = None
+    ear_max: float | None = None
+    ear_open_baseline: float | None = None
+    ear_threshold_used: float | None = None
+    gaze_min: float | None = None
+    gaze_max: float | None = None
+    yaw_min: float | None = None
+    yaw_max: float | None = None
+    head_motion_px: float
+    elapsed_seconds: float
+    challenge: list[str]
+
+
 class VerifyFrameResponse(BaseModel):
     status: LivenessStatus
     prompt: str | None
@@ -96,6 +121,10 @@ class VerifyFrameResponse(BaseModel):
     ready_to_match: bool = Field(
         default=False,
         description="Liveness passed and a probe embedding is available.",
+    )
+    signals: LivenessSignalsModel | None = Field(
+        default=None,
+        description="Present once the session has passed or failed, not before.",
     )
 
 
@@ -138,6 +167,16 @@ class MatchResponse(BaseModel):
     margin: float
     gallery_size: int
     candidates: list[CandidateModel]
+
+    probe_embedding_b64: str = Field(
+        description=(
+            "The embedding this attempt was matched on. Returned so the caller "
+            "can retain it when an attempt fails, which is what makes it "
+            "possible to recognise the same unidentified face turning up "
+            "repeatedly across merchants."
+        ),
+    )
+    signals: LivenessSignalsModel
 
 
 class HealthResponse(BaseModel):

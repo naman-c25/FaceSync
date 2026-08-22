@@ -1,0 +1,21 @@
+{
+  "name": "facepay-backend",
+  "version": "0.1.0",
+  "description": "API and orchestration layer for the phone-less biometric payment system",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --env-file=tests/test.env --test \"tests/*.test.js\"",
+    "keygen": "node src/scripts/generateKey.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "mongoose": "^8.20.0",
+    "dotenv": "^17.2.3",
+    "zod": "^4.1.12"
+  }
+}
