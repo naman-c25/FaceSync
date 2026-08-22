@@ -67,6 +67,27 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Where this identity came from. `benchmark` rows are faces from a public
+    // research dataset, loaded to measure whether 1:N still holds at a
+    // realistic gallery size — see scripts/loadBenchmark.js.
+    //
+    // They are deliberately *in* the candidate pool, because the whole point is
+    // to make every real customer compete against thousands of other faces.
+    // What they must never be is the answer: a benchmark row is not a person
+    // who consented to anything, has no PIN, and cannot be charged. The guard
+    // for that lives at the two places an identity turns into a consequence —
+    // taking a payment, and collapsing a repeat registration.
+    source: {
+      type: String,
+      enum: ['live', 'benchmark'],
+      default: 'live',
+      index: true,
+    },
+
+    // Which dataset and which person within it, kept only for benchmark rows so
+    // a surprising score can be traced back to the image that produced it.
+    benchmarkLabel: { type: String, default: null },
+
     // What the candidate pool narrows on. At demo scale every active user is a
     // candidate; as enrollment grows these keep the comparison count bounded
     // without ever asking the customer to identify themselves.

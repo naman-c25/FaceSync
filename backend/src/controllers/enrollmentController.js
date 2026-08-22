@@ -224,8 +224,32 @@ async function findExistingRegistration(embeddingB64) {
   if (gallery.length === 0) return null;
 
   const comparison = await mlService.compare(embeddingB64, gallery);
-  const best = comparison.candidates[0];
 
-  if (!best || comparison.top_score < DUPLICATE_THRESHOLD) return null;
-  return { userId: best.user_id, score: comparison.top_score };
+  const close = comparison.candidates.filter((c) => c.score >= DUPLICATE_THRESHOLD);
+  if (close.length === 0) return null;
+
+  // Benchmark rows are in the pool so that a real face has to out-score
+  // thousands of others, but they are not registrations and this face cannot
+  // be a repeat of one. Merging into one would be the worst outcome available:
+  // a real person's identity written onto a research record, and every later
+  // payment of theirs refused as a benchmark match.
+  const sources = await User.find({ _id: { $in: close.map((c) => c.user_id) } })
+    .select('source benchmarkLabel')
+    .lean();
+  const byId = new Map(sources.map((u) => [String(u._id), u]));
+
+  const benchmarkHit = close.find((c) => byId.get(c.user_id)?.source === 'benchmark');
+  if (benchmarkHit) {
+    // Not fatal to this enrollment, but it is a false match at the exact
+    // threshold duplicates are collapsed on, and it should never be silent.
+    console.warn(
+      `[enroll] new face scored ${benchmarkHit.score} against benchmark row ` +
+        `${benchmarkHit.user_id} (${byId.get(benchmarkHit.user_id)?.benchmarkLabel})`,
+    );
+  }
+
+  const duplicate = close.find((c) => byId.get(c.user_id)?.source !== 'benchmark');
+  if (!duplicate) return null;
+
+  return { userId: duplicate.user_id, score: duplicate.score };
 }

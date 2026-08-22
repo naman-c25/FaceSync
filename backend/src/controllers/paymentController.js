@@ -110,6 +110,37 @@ export async function charge(req, res) {
       });
     }
 
+    // A benchmark face is not a customer. Those rows are research images
+    // loaded to make the gallery a realistic size, and reaching this line
+    // means a live person out-scored every real customer against one of them —
+    // a false match, which is exactly what the benchmark exists to detect.
+    //
+    // Refused here rather than left to fail later at the PIN step. It would
+    // fail there anyway, benchmark rows having no PIN, but it would be
+    // recorded as "this customer never set a PIN" and the one event most worth
+    // seeing would be filed under a routine one.
+    if (matchedUser.source === 'benchmark') {
+      console.warn(
+        `[charge] FALSE MATCH against benchmark row ${matchedUser._id} ` +
+          `(${matchedUser.benchmarkLabel}) at ${confidence.top} ` +
+          `over ${identified.result.gallery_size} candidates — log ${logId}`,
+      );
+
+      session.completed = true;
+      await session.save();
+
+      return res.json({
+        charged: false,
+        decision: 'benchmark_match',
+        reason:
+          'The closest face in the gallery is a benchmark record, not an ' +
+          'enrolled customer. Nothing was charged.',
+        confidence,
+        gallerySize: identified.result.gallery_size,
+        logId: String(logId),
+      });
+    }
+
     // Remembered so the PIN can arrive in a second call.
     session.identifiedUser = matchedUser._id;
     session.identifiedLog = identified.log._id;

@@ -22,7 +22,24 @@ export async function createTestContext() {
   }
 
   const ml = createFakeMlService();
-  await ml.listen();
+
+  // The fake service binds the one fixed port the backend is configured to
+  // call, and every test file shares one throwaway database that `reset()`
+  // empties between tests. Both make running test files in parallel — which is
+  // the runner's default — a deadlock on the port and a race on the data, so
+  // `npm test` passes --test-concurrency=1. Said out loud here because the
+  // symptom otherwise is several test processes hanging with no output at all,
+  // which looks like a slow machine rather than a configuration mistake.
+  try {
+    await ml.listen();
+  } catch (cause) {
+    if (cause.code !== 'EADDRINUSE') throw cause;
+    throw new Error(
+      'The fake ML service port is already taken. Test files cannot run in ' +
+        'parallel — use `npm test`, which sets --test-concurrency=1.',
+    );
+  }
+
   await mongoose.connect(config.MONGODB_URI);
 
   const server = createApp().listen(0, '127.0.0.1');

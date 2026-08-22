@@ -23,6 +23,8 @@ export function createFakeMlService({ port = 8099 } = {}) {
     runnerUpScore: 0.31,
     enrollmentAccepts: true,
     duplicateScore: 0.05,
+    compareRunnerUp: 0.1,
+    compareUserId: null,
     modelsLoaded: true,
     failNextRequest: null, // { status, detail }
     delayMs: 0,
@@ -77,19 +79,37 @@ export function createFakeMlService({ port = 8099 } = {}) {
       outliers_dropped: 0,
     }),
 
-    'POST /compare': (body) => ({
-      decision: state.duplicateScore >= 0.45 ? 'matched' : 'no_match',
-      user_id:
-        state.duplicateScore >= 0.45 ? (body.gallery[0]?.user_id ?? null) : null,
-      top_score: state.duplicateScore,
-      runner_up_score: 0.1,
-      margin: Number((state.duplicateScore - 0.1).toFixed(4)),
-      gallery_size: body.gallery.length,
-      candidates: body.gallery.slice(0, 5).map((entry, index) => ({
-        user_id: entry.user_id,
-        score: index === 0 ? state.duplicateScore : 0.1,
-      })),
-    }),
+    // `compareRunnerUp` scores every candidate below the top one. It defaults
+    // to a nothing score, but a test can raise it to put a second face above
+    // the duplicate threshold — which is what happens once the gallery holds
+    // benchmark rows and the highest scorer is not the one that matters.
+    'POST /compare': (body) => {
+      // `compareUserId` names who the comparison should land on. The default of
+      // "whatever is first in the gallery" is fine for the duplicate check, but
+      // the widened second-tier search exists precisely to find someone the
+      // narrow pool left out, so a test has to be able to say who that is.
+      const winner =
+        state.compareUserId ??
+        body.gallery[0]?.user_id ??
+        null;
+      const matched = state.duplicateScore >= 0.45;
+
+      return {
+        decision: matched ? 'matched' : 'no_match',
+        user_id: matched ? winner : null,
+        top_score: state.duplicateScore,
+        runner_up_score: state.compareRunnerUp,
+        margin: Number((state.duplicateScore - state.compareRunnerUp).toFixed(4)),
+        gallery_size: body.gallery.length,
+        candidates: [
+          { user_id: winner, score: state.duplicateScore },
+          ...body.gallery
+            .filter((entry) => entry.user_id !== winner)
+            .slice(0, 4)
+            .map((entry) => ({ user_id: entry.user_id, score: state.compareRunnerUp })),
+        ],
+      };
+    },
 
     'POST /verify/start': () => ({
       session_id: randomUUID(),
@@ -191,14 +211,25 @@ export function createFakeMlService({ port = 8099 } = {}) {
         runnerUpScore: 0.31,
         enrollmentAccepts: true,
         duplicateScore: 0.05,
+        compareRunnerUp: 0.1,
+        compareUserId: null,
         modelsLoaded: true,
         failNextRequest: null,
         delayMs: 0,
         requests: [],
       });
     },
+    // Rejects rather than emitting on the server, so a port already in use
+    // surfaces as a failed test with a reason instead of an unhandled 'error'
+    // event and a process that never finishes starting.
     listen: () =>
-      new Promise((resolve) => server.listen(port, '127.0.0.1', resolve)),
+      new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(port, '127.0.0.1', () => {
+          server.removeListener('error', reject);
+          resolve();
+        });
+      }),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

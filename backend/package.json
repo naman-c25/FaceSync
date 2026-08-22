@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --env-file=tests/test.env --test \"tests/*.test.js\"",
+    "test": "node --env-file=tests/test.env --test --test-concurrency=1 \"tests/*.test.js\"",
     "keygen": "node src/scripts/generateKey.js"
   },
   "dependencies": {

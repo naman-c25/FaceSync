@@ -36,3 +36,8 @@ frontend/dist/
 # Built kiosk staged into the API service. The Docker build produces this;
 # committing build output would only let it drift from the source.
 backend/public/
+
+# Benchmark faces used to measure 1:N accuracy at scale. Public dataset,
+# hundreds of megabytes, and re-downloadable — see benchmark-data/README.md.
+benchmark-data/*
+!benchmark-data/README.md
