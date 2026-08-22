@@ -5,6 +5,7 @@ here — including the spoof attempts — is driven by synthetic landmark data.
 No camera, no model, no fixtures to record.
 """
 
+import random
 import sys
 from math import ceil
 from pathlib import Path
@@ -163,6 +164,62 @@ def test_single_frame_dip_is_not_a_blink():
 
     assert session.signals.blinks_detected == 0
     assert session.status is LivenessStatus.IN_PROGRESS
+
+
+def test_capture_rate_is_what_decides_whether_a_blink_is_seen():
+    """Why frames are batched rather than sent one per request.
+
+    A blink is a ~250ms event. Sampling at the rate a browser can *ship*
+    frames over a tunnel — 3 or 4 a second — means the closure often falls
+    entirely between two samples and is never observed at all. Sampling at the
+    rate a browser can *capture* them catches it every time.
+
+    This is the difference the batching exists to buy, and it explains why gaze
+    challenges passed on connections where blink challenges failed: a gaze is a
+    held position and shows up in any frame, while a blink has to be caught in
+    the act.
+    """
+    # A normal blink. Deliberate ones run longer, but this is the case that has
+    # to work, and it is short enough that the sampling rate decides the outcome.
+    BLINK_MS = 150.0
+    TRIALS = 200
+
+    def detection_rate(fps: float) -> float:
+        """Share of blinks caught at `fps`, over random blink timings.
+
+        The offset has to be random. A blink starting exactly on a frame
+        boundary is the best case for any rate, and measuring only that would
+        make a slow rate look fine.
+        """
+        frame_ms = 1000.0 / fps
+        rng = random.Random(20260822)
+        caught = 0
+
+        for _ in range(TRIALS):
+            clock = Clock(step_ms=frame_ms)
+            session = LivenessSession("rate", [ChallengeStep(ActionType.BLINK, count=1)])
+            feed(session, eyes_open_baseline(), clock)
+
+            blink_start = clock.now * 1000.0 + rng.uniform(0, frame_ms)
+            for _ in range(int(1500 / frame_ms) + 2):
+                now_ms = clock.now * 1000.0
+                closed = blink_start <= now_ms < blink_start + BLINK_MS
+                session.submit_frame(
+                    geometry(ear=EYES_SHUT if closed else EYES_OPEN), now=clock.tick()
+                )
+
+            caught += session.signals.blinks_detected >= 1
+
+        return caught / TRIALS
+
+    shipped = detection_rate(4)  # one frame per request, over a tunnel
+    captured = detection_rate(15)  # what the camera itself can do
+
+    assert captured > 0.95, f"capture rate should be near-certain, got {captured:.0%}"
+    assert shipped < 0.8, (
+        f"4fps caught {shipped:.0%} — if that were reliable, batching would be "
+        "solving a problem that does not exist"
+    )
 
 
 @pytest.mark.parametrize("fps", [30, 25, 15, 10, 6, 4])
@@ -529,9 +586,30 @@ def test_session_fails_when_the_face_leaves():
     assert session.failure_reason == "face_lost"
 
 
-def test_frame_budget_stops_a_brute_force_attempt():
-    session = LivenessSession("s11", [ChallengeStep(ActionType.LOOK_LEFT)])
-    feed(session, [geometry()] * (settings.liveness_max_frames + 2))
+def test_the_timeout_governs_at_a_realistic_capture_rate():
+    """The frame budget must not end a challenge someone is still performing.
+
+    It used to. At 150 frames and a local 30fps the budget expired after five
+    seconds — long before anyone could blink twice and then turn their head —
+    so the budget, not the timeout, was deciding when to give up.
+    """
+    clock = Clock(step_ms=1000.0 / 15)  # a normal browser capture rate
+    session = LivenessSession("timeout", [ChallengeStep(ActionType.LOOK_LEFT)])
+
+    # Run past the timeout, one frame at a time.
+    frames = int(settings.liveness_timeout_seconds * 15) + 5
+    feed(session, [geometry()] * frames, clock)
+
+    assert session.status is LivenessStatus.FAILED
+    assert session.failure_reason == "challenge_timeout"
+    assert session.signals.frames_processed < settings.liveness_max_frames
+
+
+def test_the_frame_budget_still_backstops_an_absurd_rate():
+    """Compute stays bounded even if frames arrive faster than time passes."""
+    clock = Clock(step_ms=1.0)  # 1000fps — nothing real, which is the point
+    session = LivenessSession("budget", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, [geometry()] * (settings.liveness_max_frames + 2), clock)
 
     assert session.status is LivenessStatus.FAILED
     assert session.failure_reason == "frame_budget_exceeded"

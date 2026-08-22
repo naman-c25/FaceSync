@@ -104,8 +104,15 @@ export const mlService = {
 
   startVerification: () => request('/verify/start'),
 
-  submitFrame: (sessionId, imageB64) =>
-    request('/verify/frame', { session_id: sessionId, image_b64: imageB64 }),
+  /**
+   * Send a batch of consecutive frames with the moments they were captured.
+   *
+   * Batched because the sampling rate has to be decoupled from the round trip:
+   * a browser captures at 15fps and ships perhaps 4fps over a tunnel, and at
+   * 4fps a 250ms blink falls between samples more often than not.
+   */
+  submitFrames: (sessionId, frames) =>
+    request('/verify/frame', { session_id: sessionId, frames }),
 
   /**
    * Identify a verified face against a candidate pool.

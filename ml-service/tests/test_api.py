@@ -61,6 +61,14 @@ def _crop_face(image: np.ndarray, bbox, margin: float = 0.7) -> np.ndarray:
     ]
 
 
+def _batch(image_b64: str, count: int = 1, start_ms: float = 0.0, step_ms: float = 66.0):
+    """One request's worth of frames, spaced like a real 15fps capture."""
+    return [
+        {"image_b64": image_b64, "captured_at_ms": start_ms + i * step_ms}
+        for i in range(count)
+    ]
+
+
 @pytest.fixture(scope="module")
 def client():
     with TestClient(app) as test_client:
@@ -242,9 +250,10 @@ def test_motion_blur_does_not_read_as_the_face_leaving(client, faces):
     session_id = client.post("/verify/start").json()["session_id"]
     blurred = _to_b64(cv2.GaussianBlur(faces[0], (9, 9), 0))
 
-    for _ in range(settings.max_consecutive_missing_face + 5):
+    for i in range(settings.max_consecutive_missing_face + 5):
         body = client.post(
-            "/verify/frame", json={"session_id": session_id, "image_b64": blurred}
+            "/verify/frame",
+            json={"session_id": session_id, "frames": _batch(blurred, start_ms=i * 66.0)},
         ).json()
 
     assert body["failure_reason"] != "face_lost"
@@ -260,9 +269,10 @@ def test_a_frame_blurred_past_usefulness_is_still_dropped(client, faces):
     session_id = client.post("/verify/start").json()["session_id"]
     mush = _to_b64(cv2.GaussianBlur(faces[0], (61, 61), 0))
 
-    for _ in range(settings.max_consecutive_missing_face + 2):
+    for i in range(settings.max_consecutive_missing_face + 2):
         body = client.post(
-            "/verify/frame", json={"session_id": session_id, "image_b64": mush}
+            "/verify/frame",
+            json={"session_id": session_id, "frames": _batch(mush, start_ms=i * 66.0)},
         ).json()
 
     assert body["face_detected"] is False
@@ -274,9 +284,10 @@ def test_a_still_frame_makes_no_liveness_progress(client, faces):
     session_id = client.post("/verify/start").json()["session_id"]
     frame = _to_b64(faces[0])
 
-    for _ in range(12):
+    for i in range(12):
         body = client.post(
-            "/verify/frame", json={"session_id": session_id, "image_b64": frame}
+            "/verify/frame",
+            json={"session_id": session_id, "frames": _batch(frame, start_ms=i * 66.0)},
         ).json()
 
     assert body["status"] == "in_progress"
@@ -287,7 +298,7 @@ def test_a_still_frame_makes_no_liveness_progress(client, faces):
 def test_verification_rejects_an_unknown_session(client, faces):
     response = client.post(
         "/verify/frame",
-        json={"session_id": "does-not-exist", "image_b64": _to_b64(faces[0])},
+        json={"session_id": "does-not-exist", "frames": _batch(_to_b64(faces[0]))},
     )
     assert response.status_code == 404
 

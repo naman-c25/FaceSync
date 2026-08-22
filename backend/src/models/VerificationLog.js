@@ -75,6 +75,11 @@ const verificationLogSchema = new mongoose.Schema(
       framesProcessed: { type: Number, default: null },
       framesWithoutFace: { type: Number, default: null },
       blinksDetected: { type: Number, default: null },
+      longestBlinkMs: { type: Number, default: null },
+      // Frames per second actually sampled. A blink challenge that failed at
+      // 3fps failed because it was undersampled, not because a threshold is
+      // wrong — without this the two are indistinguishable in the log.
+      effectiveFps: { type: Number, default: null },
       earOpenBaseline: { type: Number, default: null },
       earThresholdUsed: { type: Number, default: null },
       elapsedSeconds: { type: Number, default: null },

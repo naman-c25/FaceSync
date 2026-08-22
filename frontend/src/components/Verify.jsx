@@ -6,6 +6,14 @@ import { CameraStage } from './CameraStage.jsx';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Capture interval, independent of how fast frames can be shipped. 15fps is
+// enough that a 250ms blink covers three or four frames.
+const CAPTURE_INTERVAL_MS = 66;
+
+// Ceiling on one request. The server caps it too; this keeps a stalled upload
+// from accumulating a batch too large to send.
+const MAX_BATCH = 12;
+
 /**
  * Live verification: stream frames, follow the challenge, then identify.
  *
@@ -72,17 +80,31 @@ export function Verify({ merchantId, onDone, onCancel }) {
     if (phase !== 'scanning' || cameraStatus !== 'ready') return undefined;
 
     let stopped = false;
+    const buffer = [];
+
+    // Capture on a fixed timer, quite separately from sending. Tying the two
+    // together made the sampling rate equal to the round trip, and at the 3-5fps
+    // a tunnel allows a 250ms blink falls between two samples more often than
+    // not — which is why gaze challenges passed while blink challenges failed
+    // on the same connection.
+    const ticker = setInterval(() => {
+      if (buffer.length >= MAX_BATCH) buffer.shift();
+      const image = capture();
+      if (image) buffer.push({ image, capturedAtMs: performance.now() });
+    }, CAPTURE_INTERVAL_MS);
 
     (async () => {
       while (!stopped) {
-        const image = capture();
-        if (!image) {
-          await sleep(80);
+        if (buffer.length === 0) {
+          await sleep(CAPTURE_INTERVAL_MS);
           continue;
         }
 
+        // Drain whatever accumulated while the previous request was in flight.
+        const batch = buffer.splice(0, MAX_BATCH);
+
         try {
-          const result = await api.submitFrame(sessionRef.current.sessionId, image);
+          const result = await api.submitFrames(sessionRef.current.sessionId, batch);
           if (stopped) return;
 
           setLiveness(result);
@@ -104,6 +126,7 @@ export function Verify({ merchantId, onDone, onCancel }) {
 
     return () => {
       stopped = true;
+      clearInterval(ticker);
     };
   }, [phase, cameraStatus, capture]);
 

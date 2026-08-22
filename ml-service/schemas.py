@@ -40,6 +40,44 @@ class FrameRequest(BaseModel):
         return _decode_frame(self.image_b64)
 
 
+class CapturedFrame(BaseModel):
+    """One frame, with the moment it was taken.
+
+    The capture time is the point of this. Frames arrive in batches because the
+    network cannot carry them one at a time fast enough, so the instant a
+    request lands says nothing about when the frames in it were taken — and the
+    blink window is measured in milliseconds. Timing them by arrival would
+    compress a whole batch into one instant and make every blink unmeasurable.
+    """
+
+    image_b64: str
+    captured_at_ms: float
+
+    @field_validator("image_b64")
+    @classmethod
+    def _validate_decodable(cls, value: str) -> str:
+        _decode_frame(value)
+        return value
+
+    @property
+    def image_bytes(self) -> bytes:
+        return _decode_frame(self.image_b64)
+
+
+class FrameBatchRequest(BaseModel):
+    """Several consecutive frames from one capture run.
+
+    A browser can capture at 15fps but only ship 3-5fps to a server over a
+    tunnel. Sending one frame per request ties the sampling rate to the round
+    trip, and a 250ms blink then falls entirely between two samples — which is
+    exactly why gaze challenges passed and blink challenges did not. Batching
+    decouples the two.
+    """
+
+    session_id: str
+    frames: list[CapturedFrame] = Field(min_length=1, max_length=12)
+
+
 # -- enrollment --------------------------------------------------------
 
 
@@ -108,6 +146,15 @@ class LivenessSignalsModel(BaseModel):
     head_motion_px: float
     elapsed_seconds: float
     challenge: list[str]
+    longest_blink_ms: float = 0.0
+    effective_fps: float | None = Field(
+        default=None,
+        description=(
+            "Frames per second actually sampled. Below about 8 a blink starts "
+            "falling between samples, so a session that failed on a blink is "
+            "worth reading against this before touching any threshold."
+        ),
+    )
 
 
 class VerifyFrameResponse(BaseModel):

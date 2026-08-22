@@ -25,12 +25,14 @@ from config import settings
 from liveness import LivenessSession, LivenessStatus
 from schemas import (
     CandidateModel,
+    CapturedFrame,
     CompareRequest,
     CompareResponse,
     EnrollmentCaptureResponse,
     EnrollmentFinalizeRequest,
     EnrollmentFinalizeResponse,
     EnrollmentStartResponse,
+    FrameBatchRequest,
     FrameRequest,
     HealthResponse,
     LivenessSignalsModel,
@@ -337,12 +339,22 @@ def verify_start() -> VerifyStartResponse:
 
 
 @app.post("/verify/frame", response_model=VerifyFrameResponse)
-def verify_frame(request: FrameRequest) -> VerifyFrameResponse:
-    """Feed one frame into the liveness challenge.
+def verify_frame(request: FrameBatchRequest) -> VerifyFrameResponse:
+    """Feed a batch of consecutive frames into the liveness challenge.
 
     Only MediaPipe runs per frame. The far more expensive ArcFace pass happens
     once, after liveness has passed — which is the whole point of checking
     liveness first.
+
+    Frames arrive in batches rather than one per request because the sampling
+    rate has to be decoupled from the round trip. A browser captures at 15fps
+    and can ship maybe 4fps over a tunnel; at 4fps a 250ms blink lands between
+    two samples more often than not, which is why gaze challenges were passing
+    while blink challenges failed on the same connection.
+
+    Each frame carries the moment it was taken, and the state machine is driven
+    by those rather than by arrival — timing a batch by when it landed would
+    collapse it to a single instant and leave every blink unmeasurable.
     """
     session = verification_sessions.get(request.session_id)
     if session is None:
@@ -350,6 +362,25 @@ def verify_frame(request: FrameRequest) -> VerifyFrameResponse:
 
     if session.liveness.status is not LivenessStatus.IN_PROGRESS:
         return _verify_response(session, face_detected=False)
+
+    face_detected = False
+    for frame_request in request.frames:
+        face_detected = _consume_frame(session, frame_request)
+        if session.liveness.status is not LivenessStatus.IN_PROGRESS:
+            break
+
+    if session.liveness.status is LivenessStatus.PASSED:
+        _extract_probe(session)
+
+    return _verify_response(session, face_detected=face_detected)
+
+
+def _consume_frame(session: VerificationSession, request: CapturedFrame) -> bool:
+    """Run one frame through detection and the state machine.
+
+    Returns whether a face was found, which the caller reports for the most
+    recent frame so the kiosk can tell someone they have moved out of shot.
+    """
 
     # No quality gate here, deliberately. The sharpness threshold exists to
     # protect embedding quality, and liveness does not need a sharp frame —
@@ -374,12 +405,9 @@ def verify_frame(request: FrameRequest) -> VerifyFrameResponse:
             sharpness=quality.sharpness,
         )
 
-    session.liveness.submit_frame(geometry)
-
-    if session.liveness.status is LivenessStatus.PASSED:
-        _extract_probe(session)
-
-    return _verify_response(session, face_detected=geometry is not None)
+    # Driven by when the frame was captured, not when it arrived.
+    session.liveness.submit_frame(geometry, now=request.captured_at_ms / 1000.0)
+    return geometry is not None
 
 
 def _extract_probe(session: VerificationSession) -> None:

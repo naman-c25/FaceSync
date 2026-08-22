@@ -56,8 +56,8 @@ export const api = {
     post('/api/enroll/finalize', { sessionId }),
 
   startVerification: (body) => post('/api/verify/start', body),
-  submitFrame: (sessionId, image) =>
-    post('/api/verify/frame', { sessionId, image }),
+  submitFrames: (sessionId, frames) =>
+    post('/api/verify/frame', { sessionId, frames }),
   match: (sessionId) => post('/api/verify/match', { sessionId }),
 };
 

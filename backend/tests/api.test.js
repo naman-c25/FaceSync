@@ -6,6 +6,13 @@ import { VerificationLog } from '../src/models/VerificationLog.js';
 import { decryptEmbedding } from '../src/services/encryption.js';
 import { createTestContext, FAKE_FRAME } from './helpers/context.js';
 
+/** One request's worth of frames, timed like a real 15fps capture. */
+const batch = (count = 1, startMs = 0) =>
+  Array.from({ length: count }, (_, i) => ({
+    image: FAKE_FRAME,
+    capturedAtMs: startMs + i * 66,
+  }));
+
 let ctx;
 
 before(async () => {
@@ -49,7 +56,7 @@ async function verifyUntilReady({ merchantId = 'shop-1', region } = {}) {
   ctx.ml.state.livenessOutcome = 'passed';
   await ctx.request('POST', '/api/verify/frame', {
     sessionId: start.body.sessionId,
-    image: FAKE_FRAME,
+    frames: batch(),
   });
 
   return start.body.sessionId;
@@ -410,7 +417,7 @@ describe('verification', () => {
 
     const frame = await ctx.request('POST', '/api/verify/frame', {
       sessionId: start.body.sessionId,
-      image: FAKE_FRAME,
+      frames: batch(),
     });
 
     assert.equal(frame.body.status, 'failed');
@@ -418,7 +425,7 @@ describe('verification', () => {
 
     const next = await ctx.request('POST', '/api/verify/frame', {
       sessionId: start.body.sessionId,
-      image: FAKE_FRAME,
+      frames: batch(),
     });
     assert.equal(next.status, 409, 'a dead challenge must not accept more frames');
   });
@@ -451,7 +458,7 @@ describe('audit trail', () => {
 
     await ctx.request('POST', '/api/verify/frame', {
       sessionId: start.body.sessionId,
-      image: FAKE_FRAME,
+      frames: batch(),
     });
 
     const log = await VerificationLog.findOne({

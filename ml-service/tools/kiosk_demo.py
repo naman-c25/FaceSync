@@ -189,9 +189,21 @@ def run_verify(args) -> int:
                 break
 
             if status == "in_progress":
+                # Sent as a one-frame batch with its capture time. Running
+                # against a local service this is barely different from sending
+                # frames singly, but the API is the batched one and the capture
+                # timestamp is what the blink window is measured against.
                 result = post(
                     "/api/verify/frame",
-                    {"sessionId": session["sessionId"], "image": encode(frame)},
+                    {
+                        "sessionId": session["sessionId"],
+                        "frames": [
+                            {
+                                "image": encode(frame),
+                                "capturedAtMs": time.monotonic() * 1000.0,
+                            }
+                        ],
+                    },
                 )
                 status = result["status"]
                 prompt = result["prompt"] or prompt

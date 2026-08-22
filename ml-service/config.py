@@ -155,8 +155,17 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # A live person completes a challenge in a few seconds. A long session
     # usually means someone is fiddling with a spoof.
-    liveness_timeout_seconds: float = 12.0
-    liveness_max_frames: int = 150
+    # Long enough to read two prompts and perform them. 12s was too tight over
+    # a network: people were still working through the challenge when it
+    # expired, then closed the tab.
+    liveness_timeout_seconds: float = 25.0
+
+    # A backstop on compute, not a stand-in for the timeout. It used to be 150,
+    # which at a local 30fps is five seconds — so the frame budget, not the
+    # timeout, was ending challenges, and it ended them well before anyone
+    # could blink twice and then turn their head. Set high enough that the
+    # timeout always governs at any plausible capture rate.
+    liveness_max_frames: int = 700
 
     # Faces drop out for a frame or two constantly — a hand passes the lens, the
     # user glances away. Only a sustained run means they actually left.

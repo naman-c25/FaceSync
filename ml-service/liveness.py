@@ -103,6 +103,7 @@ class LivenessSignals:
     yaw_max: float | None = None
     head_motion_px: float = 0.0
     elapsed_seconds: float = 0.0
+    effective_fps: float | None = None
 
 
 def generate_challenge(steps: int | None = None) -> list[ChallengeStep]:
@@ -124,11 +125,12 @@ def generate_challenge(steps: int | None = None) -> list[ChallengeStep]:
         choices = [a for a in ActionType if a is not previous]
         action = choices[secrets.randbelow(len(choices))]
 
-        # Randomising the blink count adds entropy for the cost of one digit
-        # in the prompt.
+        # The blink count used to vary between two and three for extra entropy.
+        # Three proved too many in practice: a blink is a ~250ms event, and at
+        # the frame rates a browser achieves over a network each one is easy to
+        # sample straight past, so asking for three failed sessions that two
+        # would have passed. The entropy that matters is in the step sequence.
         count = settings.blinks_required if action is ActionType.BLINK else 1
-        if action is ActionType.BLINK and secrets.randbelow(2):
-            count += 1
 
         sequence.append(ChallengeStep(action=action, count=count))
         previous = action
@@ -153,8 +155,15 @@ class LivenessSession:
         self.signals = LivenessSignals()
 
         self.step_index = 0
-        self.created_at = time.monotonic()
-        self.last_seen_at = self.created_at
+
+        # Anchored to the first frame's capture time, not to when this object
+        # was built. Frames carry their own timestamps so that batching does
+        # not distort the blink window, which means the challenge clock is the
+        # camera's, and mixing it with a server clock would make every elapsed
+        # figure meaningless. Session expiry is a separate concern and stays on
+        # the server clock, in session_store.
+        self._started_at: float | None = None
+        self._last_frame_at: float | None = None
 
         self._consecutive_missing = 0
         self._closed_since: float | None = None
@@ -179,9 +188,6 @@ class LivenessSession:
         step = self.current_step
         return step.prompt if step else None
 
-    def is_expired(self) -> bool:
-        return time.monotonic() - self.last_seen_at > settings.session_ttl_seconds
-
     def outcome(self) -> FrameOutcome:
         """Current progress, without consuming a frame."""
         return self._outcome()
@@ -199,9 +205,20 @@ class LivenessSession:
             return self._outcome()
 
         now = time.monotonic() if now is None else now
-        self.last_seen_at = now
+        if self._started_at is None:
+            self._started_at = now
+        self._last_frame_at = now
+
         self.signals.frames_processed += 1
-        self.signals.elapsed_seconds = round(now - self.created_at, 3)
+        self.signals.elapsed_seconds = round(now - self._started_at, 3)
+
+        # Reported so a failed blink challenge can be read against the rate it
+        # was sampled at. Below roughly 8fps a blink starts falling between
+        # frames, and that is a capture problem rather than a threshold one.
+        if self.signals.elapsed_seconds > 0:
+            self.signals.effective_fps = round(
+                self.signals.frames_processed / self.signals.elapsed_seconds, 1
+            )
 
         if self._budget_exhausted():
             return self._outcome()
@@ -450,9 +467,9 @@ class LivenessSession:
             return 1.0
         if step.action is ActionType.BLINK:
             return min(self._blinks_this_step / step.count, 1.0)
-        if self._gaze_held_since is None:
+        if self._gaze_held_since is None or self._last_frame_at is None:
             return 0.0
-        held_ms = (time.monotonic() - self._gaze_held_since) * 1000.0
+        held_ms = (self._last_frame_at - self._gaze_held_since) * 1000.0
         return min(held_ms / settings.gaze_hold_ms, 1.0)
 
     def _outcome(self) -> FrameOutcome:

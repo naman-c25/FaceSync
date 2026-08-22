@@ -18,9 +18,22 @@ const startSchema = z.object({
   region: z.string().trim().max(80).nullish(),
 });
 
+// Frames arrive in batches, each carrying the moment it was taken. The
+// sampling rate has to be decoupled from the round trip: a browser captures at
+// 15fps and ships maybe 4fps over a tunnel, and at 4fps a 250ms blink falls
+// between samples more often than not — which is why gaze challenges were
+// passing on connections where blink challenges failed.
 const frameSchema = z.object({
   sessionId: z.string().min(1),
-  image: z.string().min(1),
+  frames: z
+    .array(
+      z.object({
+        image: z.string().min(1),
+        capturedAtMs: z.number().finite(),
+      }),
+    )
+    .min(1)
+    .max(12),
 });
 
 const matchSchema = z.object({ sessionId: z.string().min(1) });
@@ -64,6 +77,10 @@ function livenessFields(signals, { passed, failureReason = null } = {}) {
     framesProcessed: signals.frames_processed,
     framesWithoutFace: signals.frames_without_face,
     blinksDetected: signals.blinks_detected,
+    longestBlinkMs: signals.longest_blink_ms,
+    // The number that separates "the threshold is wrong" from "the blink was
+    // never sampled". Below about 8fps a 250ms blink falls between frames.
+    effectiveFps: signals.effective_fps,
     earOpenBaseline: signals.ear_open_baseline,
     earThresholdUsed: signals.ear_threshold_used,
     elapsedSeconds: signals.elapsed_seconds,
@@ -104,7 +121,13 @@ export async function submitFrame(req, res) {
     throw new ApiError(409, 'Session already completed', 'session_completed');
   }
 
-  const result = await mlService.submitFrame(session.mlSessionId, body.image);
+  const result = await mlService.submitFrames(
+    session.mlSessionId,
+    body.frames.map((f) => ({
+      image_b64: f.image,
+      captured_at_ms: f.capturedAtMs,
+    })),
+  );
 
   if (result.signals?.challenge?.length && session.challenge.length === 0) {
     session.challenge = result.signals.challenge;
