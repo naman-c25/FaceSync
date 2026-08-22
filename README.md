@@ -1,14 +1,3 @@
----
-title: FacePay
-emoji: 🫆
-colorFrom: green
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
-short_description: Pay with your face - no phone, no card, no app
----
-
 # FacePay
 
 Pay at a shop without a phone, a card, or an app. Walk up, and the camera works
@@ -137,9 +126,12 @@ Each of these looked like a working system until something specific caught it.
 
 ## Deploying
 
-`DEPLOY.md` walks through it. Short version: MongoDB Atlas for the database,
-and one Hugging Face Space for everything else — the root `Dockerfile` builds
-the kiosk, the API and the ML service into a single image.
+`DEPLOY.md` walks through it. For collecting data from people over a few days,
+a tunnel from your own machine (`cloudflared tunnel --url http://localhost:3000`)
+is free and takes two minutes — the Node service serves the built kiosk, so one
+tunnel exposes the whole app on one URL. For something that stays up without a
+laptop, the root `Dockerfile` builds all three into one image; Google Cloud Run
+is the closest thing to a free tier that has enough memory to load the models.
 
 The API and the ML service are deployed together on purpose. Every liveness
 frame travels browser → Node → Python → back, so splitting them across hosts

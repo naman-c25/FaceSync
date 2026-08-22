@@ -1,132 +1,143 @@
-# Deploying — getting a link you can share
+# Getting a link you can share
 
-Two things to set up. Budget about half an hour the first time, most of it
-waiting for a build.
+There are two different problems here, and they want different answers.
 
-| what | where | cost |
-|---|---|---|
-| Database | MongoDB Atlas | free |
-| Everything else | Hugging Face Spaces (Docker) | free |
+**Collecting data from friends over the next few days** — a tunnel from your own
+machine. Free, works in two minutes, and everything already runs there.
 
-The kiosk, the API and the ML service all ship in one image. The Docker build
-compiles the frontend and the Node service serves it, so there is one origin,
-one URL, and no CORS to configure.
+**A link that stays up without your laptop** — a real host. Costs something, or
+costs setup effort.
 
-## Why not Vercel
+Start with the tunnel. Move to a host only when you actually need one.
 
-The ML service cannot go there at all — it loads about a gigabyte of models,
-and serverless functions have neither the memory nor a filesystem that survives
-between calls.
-
-Less obvious, and the more important point: **do not split the API and the ML
-service across two hosts.** Every liveness frame travels browser → Node →
-Python → back, and a separate host adds a network hop to each of the 20-30
-frames in one verification. That latency lands directly on the challenge the
-user is trying to complete, and the frame rate is what the blink detection
-depends on.
-
-They are still separate services — the Python side knows nothing about the
-database, the Node side does no ML. Only the deployment is shared, and the call
-between them is over loopback.
+> **Correction:** an earlier version of this file recommended Hugging Face
+> Spaces. Docker Spaces are a paid tier, so that route is not free.
 
 ---
 
-## 1. MongoDB Atlas
+## The tunnel route
 
-1. Sign up at [mongodb.com/atlas](https://www.mongodb.com/atlas) and create a
-   free **M0** cluster.
-2. **Database Access** → add a user. Use a long random password.
-3. **Network Access** → add `0.0.0.0/0`. Hugging Face publishes no fixed egress
-   IPs, so there is nothing narrower to allow. That password is now the only
-   thing in front of your database — which is why it should be a long random
-   one.
-4. **Connect** → *Drivers* → copy the string, and add the database name:
+The Node service serves the built kiosk, so one tunnel to one port exposes the
+whole app — no CORS, no second URL, no config changes.
+
+```bash
+# 1. Build the kiosk into the API service (once, and after any frontend change)
+cd frontend && npm run build:serve
+
+# 2. Start both services, in two terminals
+cd ml-service && .venv/Scripts/activate && python app.py
+cd backend && npm start
+
+# 3. Open a tunnel — you already have both of these installed
+cloudflared tunnel --url http://localhost:3000
+```
+
+`cloudflared` prints an `https://something-random.trycloudflare.com` URL.
+That is the link. HTTPS is included, which the camera requires.
+
+`ngrok http 3000` works the same way if you prefer it.
+
+**What this costs you:** the link dies when your laptop sleeps, and the URL
+changes each time you restart the tunnel. For a few days of collecting faces
+from people you can message a new link to, neither matters much. Nothing gets
+lost — the data is in MongoDB either way.
+
+Keep the laptop plugged in and stop it from sleeping while people are using it.
+
+---
+
+## When you need it always-on
+
+The ML service is the whole constraint: roughly a gigabyte of models in memory.
+That rules out most free tiers, which cap at 512MB.
+
+| host | memory | cost | notes |
+|---|---|---|---|
+| **Google Cloud Run** | 2GB | free tier covers a demo | scales to zero, HTTPS included, needs a card on file |
+| Railway | 8GB | $5 credit/month | easiest deploy of the three |
+| Oracle Cloud | 24GB | free forever | ARM, and you set up HTTPS yourself |
+| Render / Koyeb / Fly free | 512MB | free | **will not load the models** |
+
+### Google Cloud Run
+
+Closest to a free lunch that actually works. The free tier is 2M requests and
+180,000 vCPU-seconds a month, which a demo does not come near. A card is
+required, but nothing is charged inside those limits.
+
+```bash
+# install the gcloud CLI first: cloud.google.com/sdk
+gcloud run deploy facepay \
+  --source . \
+  --region asia-south1 \
+  --memory 2Gi \
+  --cpu 2 \
+  --timeout 300 \
+  --allow-unauthenticated \
+  --set-env-vars "PORT=8080" \
+  --set-secrets "ENCRYPTION_KEY=facepay-key:latest,MONGODB_URI=facepay-mongo:latest"
+```
+
+`asia-south1` is Mumbai — worth picking, since every liveness frame makes a
+round trip and the region is most of that latency.
+
+Store the two secrets first:
+
+```bash
+echo -n "<your 64 hex chars>" | gcloud secrets create facepay-key --data-file=-
+echo -n "<your atlas string>" | gcloud secrets create facepay-mongo --data-file=-
+```
+
+Cloud Run scales to zero, so the first request after an idle period waits out a
+cold start — 30-60 seconds with an image this size. Open it yourself before
+sharing it.
+
+---
+
+## MongoDB
+
+The tunnel route can keep using your local MongoDB. A real host needs Atlas.
+
+1. Free **M0** cluster at [mongodb.com/atlas](https://www.mongodb.com/atlas).
+2. **Database Access** → add a user with a long random password.
+3. **Network Access** → `0.0.0.0/0`. No host publishes fixed egress IPs, so
+   there is nothing narrower to allow — which makes that password the only
+   thing in front of your database.
+4. **Connect → Drivers**, and append the database name:
 
 ```
 mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/facepay?retryWrites=true&w=majority
 ```
 
-## 2. Hugging Face Space
+Point the backend at it with `MONGODB_URI`.
 
-Free tier gives 2 vCPU and 16GB RAM. The memory is what matters — most free
-tiers cap at 512MB and will not load the models at all. It also idles for 48
-hours before sleeping, against the 15 minutes typical elsewhere.
-
-1. Create an account at [huggingface.co](https://huggingface.co).
-2. **New Space** → SDK **Docker** → *Blank* → **Public**.
-3. Generate an encryption key and keep a copy somewhere safe:
+## The encryption key
 
 ```bash
 cd backend && npm run keygen
 ```
 
-4. **Settings → Variables and secrets** → add these three as **secrets**:
-
-| name | value |
-|---|---|
-| `ENCRYPTION_KEY` | the 64 hex characters, without the `ENCRYPTION_KEY=` prefix |
-| `MONGODB_URI` | the Atlas string from step 1 |
-| `CORS_ORIGINS` | `*` — nothing else calls this API cross-origin |
-
-**Losing the encryption key makes every stored embedding unreadable and
-everyone has to register again.** It is not recoverable, and it must never be
-committed.
-
-5. Push the repository:
-
-```bash
-git remote add space https://huggingface.co/spaces/<you>/facepay
-git push space main
-```
-
-The first build takes 10-15 minutes: two runtimes, then the models. When it
-finishes, everything is at:
-
-```
-https://<you>-facepay.hf.space
-```
-
-Check `/health` before sharing it. It should report
-`mlService.reachable: true`.
-
-**A Space is public.** Anyone can read the code. Values set as *secrets* are
-not exposed, but do not put anything in the repository you would not publish —
-and note that `backend/.env` is gitignored precisely so it never gets there.
+You already have one in `backend/.env`. **Use that same one** — a new key makes
+every existing registration unreadable and everyone has to enrol again. It is
+not recoverable and must never be committed.
 
 ---
 
-## Before you share the link
+## Before you send the link to anyone
 
-**The camera needs HTTPS.** Spaces provide it, so this only bites if you
-improvise a host. Over plain HTTP the browser exposes no camera at all, and the
-page says so rather than failing silently.
-
-**Open it yourself first.** A sleeping Space takes 30-60 seconds to wake, and
-that wait would otherwise be the first thing a visitor sees.
+**Open it yourself first.** A cold start or a waking tunnel is otherwise the
+first thing a visitor sees.
 
 **Register yourself first.** Verification compares a face against everyone
 enrolled. With an empty database there is nothing to match, so the first person
-to try gets `no_match` and concludes it is broken.
+gets `no_match` and concludes it is broken.
 
 **Say something about consent.** People are handing biometric data to a student
-project. The consent screen is honest about what is stored, but a message
+project. The consent screen is honest about what is kept, but a message
 beforehand goes further than a checkbox.
 
----
-
-## Optional: a nicer URL with Vercel
-
-Only worth it for the domain. It also reintroduces CORS, a second host, and a
-cross-origin request per frame.
-
-```bash
-cd frontend
-npx vercel
-```
-
-Set `VITE_API_URL` to the Space URL in the Vercel dashboard and redeploy, then
-set the Space's `CORS_ORIGINS` to the Vercel origin — not `*`, once a real
-origin exists to name.
+**Ask for a few tries each, in different light.** One attempt per person gives
+you almost nothing. Five each, at different times of day, is what a real FRR
+number needs.
 
 ---
 
@@ -134,27 +145,28 @@ origin exists to name.
 
 ```bash
 cd backend
-MONGODB_URI="<your atlas string>" node src/scripts/dedupe.js
+node src/scripts/dedupe.js            # duplicate registrations, dry run
+node src/scripts/dedupe.js --apply    # remove them
 ```
 
-Dry run by default; add `--apply` to actually remove duplicates.
+Prefix with `MONGODB_URI=...` to run against a deployed database.
 
 ## When something is wrong
 
-**`mlService.reachable: false`** — the Python service did not start. Check the
-Space logs; usually the model download failed during the build.
+**`mlService.reachable: false`** — the Python service is not running, or the
+backend is pointed at the wrong `ML_SERVICE_URL`.
 
-**Everything returns `no_match`** — nobody is enrolled yet, or you are looking
-at a different database than you think.
+**Everything returns `no_match`** — nobody is enrolled, or you are looking at a
+different database than you think.
 
 **Everything returns `ambiguous`** — someone is enrolled more than once. Two
 copies of one face sit inside the match margin of each other, so neither can be
-told from the other. Run the dedupe script. Enrollment now collapses repeat
-registrations on its own, so this should only affect records created earlier.
+told from the other. Enrollment collapses repeats on its own now, so this only
+affects records created before that.
 
 **`liveness_failed` constantly** — usually light. The challenge has to see eye
 and head movement clearly, and a backlit face defeats it.
 
-**Frames crawl** — check where the Space is hosted relative to your users.
-There is nothing to tune on the client: it already sends one frame at a time
-and adapts to whatever the round trip allows.
+**Frames crawl over the tunnel** — expected on a slow uplink. The client sends
+one frame at a time and adapts, and the challenge is measured in milliseconds
+rather than frames, so it still works — just slower.

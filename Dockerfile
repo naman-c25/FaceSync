@@ -6,9 +6,9 @@
 # splitting them across two hosts adds a network hop to each of the 20-30
 # frames in one verification. Co-located, that call is over loopback.
 #
-# Built for Hugging Face Spaces (free, 16GB RAM, and it idles for 48 hours
-# rather than the 15 minutes most free tiers allow), but it is a plain
-# Dockerfile and runs anywhere that takes one.
+# Any host that takes a Dockerfile will run this. The constraint to check
+# before picking one is memory: the models want roughly a gigabyte, which rules
+# out the 512MB free tiers most platforms offer. See DEPLOY.md.
 
 # --- build the kiosk ------------------------------------------------------
 # A separate stage so the frontend's build tooling never reaches the runtime
@@ -37,7 +37,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Spaces run as a non-root user, and the model cache has to be writable.
+# Run as a non-root user, with a home directory the model cache can write to.
 RUN useradd -m -u 1000 app
 WORKDIR /home/app
 
@@ -68,6 +68,7 @@ ENV PYTHONUNBUFFERED=1 \
     ML_SERVICE_URL=http://127.0.0.1:8001 \
     PORT=7860
 
+# Most platforms inject their own PORT; 7860 is only a default.
 EXPOSE 7860
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
