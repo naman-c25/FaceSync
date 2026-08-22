@@ -29,3 +29,6 @@ test-data/spoof_test_cases/*
 # OS
 Thumbs.db
 .DS_Store
+
+# Vite build output
+frontend/dist/

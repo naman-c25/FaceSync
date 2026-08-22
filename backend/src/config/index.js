@@ -46,6 +46,16 @@ const schema = z.object({
 
   // Candidate pool narrowing. At demo scale everyone is a candidate; these are
   // the levers that keep the pool bounded as enrollment grows.
+  // Comma-separated origins allowed to call this API from a browser, or "*"
+  // to allow any. Deployed, the frontend is on a different origin, so without
+  // this every request fails the preflight.
+  //
+  // A wildcard is tolerable here only because the API uses no cookies and no
+  // browser-managed credentials — session ids travel in the request body, so
+  // another site loading this API in a user's browser gains nothing it could
+  // not get by calling the API directly. Set real origins in production.
+  CORS_ORIGINS: z.string().default('*'),
+
   CANDIDATE_POOL_ACTIVE_DAYS: z.coerce.number().int().positive().default(180),
   CANDIDATE_POOL_MAX: z.coerce.number().int().positive().default(5000),
 
