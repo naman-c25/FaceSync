@@ -1,12 +1,13 @@
 import { z } from 'zod';
 
-import { config } from '../config/index.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { Session } from '../models/Session.js';
-import { User } from '../models/User.js';
 import { VerificationLog } from '../models/VerificationLog.js';
-import { buildCandidatePool, recordSighting } from '../services/candidatePool.js';
-import { encryptEmbedding } from '../services/encryption.js';
+import {
+  identifyFromSession,
+  livenessFields,
+  loadVerificationSession,
+} from '../services/identification.js';
 import { mlService } from '../services/mlServiceClient.js';
 
 // `.nullish()`, not `.optional()` — a client with nothing to send for a field
@@ -65,32 +66,6 @@ async function writeLog(session, fields) {
     challenge: session.challenge,
     ...fields,
   });
-}
-
-function livenessFields(signals, { passed, failureReason = null } = {}) {
-  if (!signals) return { passed, failureReason };
-
-  return {
-    passed,
-    failureReason,
-    challenge: signals.challenge ?? [],
-    framesProcessed: signals.frames_processed,
-    framesWithoutFace: signals.frames_without_face,
-    blinksDetected: signals.blinks_detected,
-    longestBlinkMs: signals.longest_blink_ms,
-    // The number that separates "the threshold is wrong" from "the blink was
-    // never sampled". Below about 8fps a 250ms blink falls between frames.
-    effectiveFps: signals.effective_fps,
-    earMin: signals.ear_min,
-    earMax: signals.ear_max,
-    gazeMin: signals.gaze_min,
-    gazeMax: signals.gaze_max,
-    yawMin: signals.yaw_min,
-    yawMax: signals.yaw_max,
-    earOpenBaseline: signals.ear_open_baseline,
-    earThresholdUsed: signals.ear_threshold_used,
-    elapsedSeconds: signals.elapsed_seconds,
-  };
 }
 
 export async function startVerification(req, res) {
@@ -183,80 +158,18 @@ export async function submitFrame(req, res) {
  */
 export async function matchFace(req, res) {
   const body = matchSchema.parse(req.body);
-  const session = await loadSession(body.sessionId);
+  const { session, error } = await loadVerificationSession(body.sessionId);
 
-  if (session.completed) {
-    throw new ApiError(409, 'Session already completed', 'session_completed');
-  }
-  if (session.attempts >= config.MAX_VERIFICATION_ATTEMPTS) {
-    throw new ApiError(429, 'Too many attempts for this session', 'attempts_exhausted');
-  }
-
-  const startedAt = Date.now();
-  session.attempts += 1;
-
-  const { gallery, undecryptable, narrowed } = await buildCandidatePool({
-    merchantId: session.merchantId,
-    region: session.region,
-  });
-
-  if (undecryptable.length > 0) {
-    // Not fatal — the rest of the pool is still usable — but it means either a
-    // key rotation left records behind or a row was tampered with.
-    console.error(
-      `[verification] ${undecryptable.length} embeddings failed to decrypt`,
-      undecryptable,
-    );
+  if (error) {
+    const [status, message] = {
+      session_not_found: [404, 'Session not found or expired'],
+      session_completed: [409, 'Session already completed'],
+      attempts_exhausted: [429, 'Too many attempts for this session'],
+    }[error];
+    throw new ApiError(status, message, error);
   }
 
-  const result = await mlService.match(session.mlSessionId, gallery);
-  const matchedUser =
-    result.decision === 'matched' ? await User.findById(result.user_id) : null;
-
-  session.completed = result.decision === 'matched';
-  await session.save();
-
-  // Retained only when the attempt did not resolve to an enrolled user. This
-  // is what makes it possible to spot the same unidentified face turning up
-  // repeatedly across merchants — a much stronger signal than a count of
-  // failures. Keeping it for a successful match would just duplicate an
-  // identity already on file.
-  const probeEmbedding = matchedUser
-    ? null
-    : encryptEmbedding(Buffer.from(result.probe_embedding_b64, 'base64'));
-
-  const log = await writeLog(session, {
-    outcome: result.decision,
-    matchedUser: matchedUser?._id ?? null,
-    scores: {
-      top: result.top_score,
-      runnerUp: result.runner_up_score,
-      margin: result.margin,
-    },
-    gallerySize: result.gallery_size,
-    candidates: result.candidates.map((c) => ({
-      userId: c.user_id,
-      score: c.score,
-    })),
-    thresholds: {
-      match: config.MATCH_THRESHOLD ?? null,
-      margin: config.MATCH_MARGIN ?? null,
-    },
-    liveness: livenessFields(result.signals, { passed: true }),
-    probeEmbedding,
-    processingTimeMs: Date.now() - startedAt,
-  });
-
-  if (matchedUser) {
-    // Deliberately not awaited into the response path: an authorised payment
-    // must not fail because a statistics update did.
-    recordSighting(matchedUser._id, {
-      merchantId: session.merchantId,
-      region: session.region,
-    }).catch((cause) =>
-      console.error('[verification] failed to record sighting', cause),
-    );
-  }
+  const { result, matchedUser, narrowed, log } = await identifyFromSession(session);
 
   res.json({
     decision: result.decision,

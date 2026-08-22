@@ -504,3 +504,62 @@ footer {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- merchant ledger ---------- */
+
+.ledger {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.ledger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.ledger-row:last-child {
+  border-bottom: none;
+}
+
+.ledger-row strong {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.ledger-row .muted {
+  display: block;
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
+.ledger-amount {
+  text-align: right;
+  font-size: 16px;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tag {
+  display: block;
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 620;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.tag-authorized {
+  color: var(--warn);
+}
+.tag-captured {
+  color: var(--accent);
+}
+.tag-failed {
+  color: var(--danger);
+}

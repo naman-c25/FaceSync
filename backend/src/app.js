@@ -7,6 +7,7 @@ import express from 'express';
 import { config } from './config/index.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { enrollmentRoutes } from './routes/enrollmentRoutes.js';
+import { merchantRoutes } from './routes/merchantRoutes.js';
 import { verificationRoutes } from './routes/verificationRoutes.js';
 import { mlService } from './services/mlServiceClient.js';
 
@@ -78,6 +79,7 @@ export function createApp() {
 
   app.use('/api/enroll', enrollmentRoutes);
   app.use('/api/verify', verificationRoutes);
+  app.use('/api/merchant', merchantRoutes);
 
   serveFrontendIfBuilt(app);
 
