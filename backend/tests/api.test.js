@@ -129,6 +129,66 @@ describe('enrollment', () => {
     assert.equal(response.body.error.issues[0].field, 'displayName');
   });
 
+  it('updates the existing record when the same face registers again', async () => {
+    // Two entries for one person sit well inside the match margin of each
+    // other, so every later attempt by them comes back ambiguous. A single
+    // accidental re-enrollment would lock that person out permanently.
+    const first = await enrol({ displayName: 'Same Person' });
+
+    ctx.ml.state.duplicateScore = 0.91;
+    const second = await ctx.request('POST', '/api/enroll/start', {
+      displayName: 'Same Person Again',
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await ctx.request('POST', '/api/enroll/capture', {
+        sessionId: second.body.sessionId,
+        image: FAKE_FRAME,
+      });
+    }
+    const done = await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId: second.body.sessionId,
+    });
+
+    assert.equal(done.body.userId, first, 'must reuse the existing record');
+    assert.equal(done.body.updatedExisting, true);
+    assert.equal(await User.countDocuments(), 1, 'no second copy may be created');
+  });
+
+  it('creates a separate record for a face nobody has registered', async () => {
+    await enrol({ displayName: 'First Person' });
+
+    ctx.ml.state.duplicateScore = 0.08;
+    const second = await enrol({ displayName: 'Second Person' });
+
+    assert.equal(await User.countDocuments(), 2);
+    assert.ok(second);
+  });
+
+  it('collapses a duplicate even when the gallery is already ambiguous', async () => {
+    // The check reads the top score, not the decision. Once someone has been
+    // enrolled twice, `identify` returns `ambiguous` — so reading the decision
+    // would let the very case that most needs collapsing slip through.
+    await enrol({ displayName: 'Person' });
+
+    ctx.ml.state.duplicateScore = 0.93;
+    ctx.ml.state.matchDecision = 'ambiguous';
+
+    const again = await ctx.request('POST', '/api/enroll/start', {
+      displayName: 'Person',
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await ctx.request('POST', '/api/enroll/capture', {
+        sessionId: again.body.sessionId,
+        image: FAKE_FRAME,
+      });
+    }
+    await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId: again.body.sessionId,
+    });
+
+    assert.equal(await User.countDocuments(), 1);
+  });
+
   it('rejects a request with no display name', async () => {
     const response = await ctx.request('POST', '/api/enroll/start', {});
 

@@ -25,6 +25,8 @@ from config import settings
 from liveness import LivenessSession, LivenessStatus
 from schemas import (
     CandidateModel,
+    CompareRequest,
+    CompareResponse,
     EnrollmentCaptureResponse,
     EnrollmentFinalizeRequest,
     EnrollmentFinalizeResponse,
@@ -267,6 +269,51 @@ def enroll_finalize(request: EnrollmentFinalizeRequest) -> EnrollmentFinalizeRes
         per_sample_similarity=similarities,
         mean_similarity=round(sum(similarities) / len(similarities), 4),
         outliers_dropped=len(outliers),
+    )
+
+
+@app.post("/compare", response_model=CompareResponse)
+def compare(request: CompareRequest) -> CompareResponse:
+    """Match one embedding against a gallery, outside any session.
+
+    Enrollment uses this to ask whether the person registering is already on
+    file. Left unchecked, a second registration of the same face lands a
+    near-identical twin in the gallery — and from then on that person can never
+    be identified, because the two copies sit within the margin of each other
+    and every attempt comes back ambiguous. One re-enrollment quietly locks
+    someone out for good.
+
+    This deliberately does not go through /verify/match, which refuses to run
+    without a passed liveness challenge. That refusal is the guarantee that no
+    spoofed frame is ever matched, and it should not be weakened to accommodate
+    a different question.
+    """
+    try:
+        probe = recognition.decode_embedding(request.embedding_b64)
+        gallery = [
+            recognition.GalleryEntry(
+                user_id=entry.user_id,
+                embedding=recognition.decode_embedding(entry.embedding_b64),
+            )
+            for entry in request.gallery
+        ]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    result = recognition.identify(
+        probe, gallery, threshold=request.threshold, margin=request.margin
+    )
+
+    return CompareResponse(
+        decision=result.decision,
+        user_id=result.user_id,
+        top_score=result.top_score,
+        runner_up_score=result.runner_up_score,
+        margin=result.margin,
+        gallery_size=result.gallery_size,
+        candidates=[
+            CandidateModel(user_id=c.user_id, score=c.score) for c in result.candidates
+        ],
     )
 
 

@@ -85,6 +85,23 @@ export const mlService = {
   finalizeEnrollment: (sessionId) =>
     request('/enroll/finalize', { session_id: sessionId }),
 
+  /**
+   * Match a loose embedding against a gallery, outside any session.
+   *
+   * Used at the end of enrollment to ask whether this face is already
+   * registered. It deliberately does not go through `match`, which refuses to
+   * run without a passed liveness challenge — that refusal is what guarantees
+   * no spoofed frame is ever matched, and it should not be relaxed to answer a
+   * different question.
+   */
+  compare: (embeddingB64, gallery) =>
+    request('/compare', {
+      embedding_b64: embeddingB64,
+      gallery,
+      threshold: config.MATCH_THRESHOLD ?? null,
+      margin: config.MATCH_MARGIN ?? null,
+    }),
+
   startVerification: () => request('/verify/start'),
 
   submitFrame: (sessionId, imageB64) =>

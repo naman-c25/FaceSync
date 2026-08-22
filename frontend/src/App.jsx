@@ -87,10 +87,15 @@ export default function App() {
       <div className="screen">
         <div className="card verdict">
           <div className="badge">✓</div>
-          <h2>You are registered</h2>
+          <h2>
+            {enrolled.updatedExisting
+              ? 'Registration updated'
+              : 'You are registered'}
+          </h2>
           <p className="muted">
-            {enrolled.enrollment.samplesUsed} samples became one encrypted
-            signature. No image of you was kept.
+            {enrolled.updatedExisting
+              ? 'We recognised you from an earlier registration and replaced it, rather than adding a second copy.'
+              : `${enrolled.enrollment.samplesUsed} samples became one encrypted signature. No image of you was kept.`}
           </p>
         </div>
 

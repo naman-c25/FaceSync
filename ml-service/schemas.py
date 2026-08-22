@@ -153,6 +153,31 @@ class CandidateModel(BaseModel):
     score: float
 
 
+class CompareRequest(BaseModel):
+    """Match a loose embedding against a gallery, with no session involved.
+
+    Used at the end of enrollment to ask "is this person already registered?".
+    That question has no liveness step — the frames it came from already passed
+    the enrollment quality gates — so it cannot go through /verify/match, which
+    deliberately refuses to run without one.
+    """
+
+    embedding_b64: str
+    gallery: list[GalleryEntryModel]
+    threshold: float | None = None
+    margin: float | None = None
+
+
+class CompareResponse(BaseModel):
+    decision: MatchDecision
+    user_id: str | None
+    top_score: float
+    runner_up_score: float
+    margin: float
+    gallery_size: int
+    candidates: list[CandidateModel]
+
+
 class MatchResponse(BaseModel):
     """Carries the runner-up score as well as the winner.
 

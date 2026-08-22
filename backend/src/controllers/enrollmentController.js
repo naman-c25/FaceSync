@@ -1,10 +1,20 @@
 import { z } from 'zod';
 
+import { config } from '../config/index.js';
 import { Session } from '../models/Session.js';
 import { User } from '../models/User.js';
+import { buildCandidatePool } from '../services/candidatePool.js';
 import { encryptEmbedding } from '../services/encryption.js';
 import { mlService } from '../services/mlServiceClient.js';
 import { ApiError } from '../middleware/errorHandler.js';
+
+/**
+ * Similarity above which a new enrollment is treated as someone already on
+ * file. Set to the ordinary match threshold rather than something stricter: if
+ * this face would match an existing user at a kiosk, it *is* a duplicate, and
+ * storing it separately is what creates the ambiguity.
+ */
+const DUPLICATE_THRESHOLD = config.MATCH_THRESHOLD ?? 0.45;
 
 // `.nullish()` rather than `.optional()` on every optional field. A JSON
 // client that has nothing to send for a field naturally sends `null` rather
@@ -108,18 +118,41 @@ export async function finalizeEnrollment(req, res) {
   const result = await mlService.finalizeEnrollment(session.mlSessionId);
   const embedding = Buffer.from(result.embedding_b64, 'base64');
 
-  const user = await User.create({
-    displayName: session.displayName,
-    embedding: encryptEmbedding(embedding),
-    enrollment: {
-      samplesUsed: result.samples_used,
-      meanSimilarity: result.mean_similarity,
-      outliersDropped: result.outliers_dropped,
-    },
-    homeRegion: session.region,
-    knownMerchants: session.merchantId ? [session.merchantId] : [],
-    recoveryDigits: body.recoveryDigits ?? null,
-  });
+  const existing = await findExistingRegistration(result.embedding_b64);
+
+  const enrollment = {
+    samplesUsed: result.samples_used,
+    meanSimilarity: result.mean_similarity,
+    outliersDropped: result.outliers_dropped,
+    completedAt: new Date(),
+  };
+
+  // Registering the same face twice must update the existing record, not add
+  // a second one. Two near-identical entries sit well inside the match margin
+  // of each other, so from then on every attempt by that person comes back
+  // ambiguous — one accidental re-enrollment locks them out permanently.
+  const user = existing
+    ? await User.findByIdAndUpdate(
+        existing.userId,
+        {
+          $set: {
+            embedding: encryptEmbedding(embedding),
+            enrollment,
+            displayName: session.displayName,
+            lastSeenAt: new Date(),
+            ...(session.region ? { homeRegion: session.region } : {}),
+          },
+        },
+        { new: true },
+      )
+    : await User.create({
+        displayName: session.displayName,
+        embedding: encryptEmbedding(embedding),
+        enrollment,
+        homeRegion: session.region,
+        knownMerchants: session.merchantId ? [session.merchantId] : [],
+        recoveryDigits: body.recoveryDigits ?? null,
+      });
 
   session.completed = true;
   await session.save();
@@ -127,6 +160,10 @@ export async function finalizeEnrollment(req, res) {
   res.status(201).json({
     userId: String(user._id),
     displayName: user.displayName,
+    // The kiosk says something different for a returning face, and the caller
+    // should not have to infer which happened from the status code.
+    updatedExisting: Boolean(existing),
+    matchedScore: existing?.score ?? null,
     enrollment: {
       samplesUsed: result.samples_used,
       meanSimilarity: result.mean_similarity,
@@ -134,4 +171,26 @@ export async function finalizeEnrollment(req, res) {
       perSampleSimilarity: result.per_sample_similarity,
     },
   });
+}
+
+/**
+ * Find the user this face is already registered as, if any.
+ *
+ * Checked against the top score rather than the decision. `identify` returns
+ * `ambiguous` when the best two candidates are close — and if someone has
+ * already been enrolled twice, that is precisely what happens. Reading the
+ * decision would mean the one case that most needs collapsing is the one case
+ * that slips through.
+ */
+async function findExistingRegistration(embeddingB64) {
+  // No merchant or region: a duplicate has to be found wherever it was
+  // registered, not just among faces local to this terminal.
+  const { gallery } = await buildCandidatePool({});
+  if (gallery.length === 0) return null;
+
+  const comparison = await mlService.compare(embeddingB64, gallery);
+  const best = comparison.candidates[0];
+
+  if (!best || comparison.top_score < DUPLICATE_THRESHOLD) return null;
+  return { userId: best.user_id, score: comparison.top_score };
 }

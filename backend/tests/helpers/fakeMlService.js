@@ -22,6 +22,7 @@ export function createFakeMlService({ port = 8099 } = {}) {
     topScore: 0.82,
     runnerUpScore: 0.31,
     enrollmentAccepts: true,
+    duplicateScore: 0.05,
     failNextRequest: null, // { status, detail }
     delayMs: 0,
     requests: [],
@@ -73,6 +74,20 @@ export function createFakeMlService({ port = 8099 } = {}) {
       per_sample_similarity: [0.97, 0.95, 0.96, 0.94, 0.97],
       mean_similarity: 0.958,
       outliers_dropped: 0,
+    }),
+
+    'POST /compare': (body) => ({
+      decision: state.duplicateScore >= 0.45 ? 'matched' : 'no_match',
+      user_id:
+        state.duplicateScore >= 0.45 ? (body.gallery[0]?.user_id ?? null) : null,
+      top_score: state.duplicateScore,
+      runner_up_score: 0.1,
+      margin: Number((state.duplicateScore - 0.1).toFixed(4)),
+      gallery_size: body.gallery.length,
+      candidates: body.gallery.slice(0, 5).map((entry, index) => ({
+        user_id: entry.user_id,
+        score: index === 0 ? state.duplicateScore : 0.1,
+      })),
     }),
 
     'POST /verify/start': () => ({
@@ -169,6 +184,7 @@ export function createFakeMlService({ port = 8099 } = {}) {
         topScore: 0.82,
         runnerUpScore: 0.31,
         enrollmentAccepts: true,
+        duplicateScore: 0.05,
         failNextRequest: null,
         delayMs: 0,
         requests: [],

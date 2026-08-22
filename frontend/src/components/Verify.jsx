@@ -15,6 +15,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * the camera is actually seeing; this way the rate simply becomes whatever the
  * round trip allows, and the server measures the challenge in milliseconds so
  * it holds up at either end of that range.
+ *
+ * The three stages are three separate effects on purpose. An effect that both
+ * depends on `phase` and sets it tears itself down mid-flight: React runs the
+ * cleanup as soon as the state changes, so an `await` sitting after that
+ * `setPhase` resolves into a scope that has already been cancelled and its
+ * result is silently dropped. That is exactly what went wrong here — the match
+ * request completed with a 200 and the answer went nowhere.
  */
 export function Verify({ merchantId, onDone, onCancel }) {
   const [phase, setPhase] = useState('starting');
@@ -23,6 +30,7 @@ export function Verify({ merchantId, onDone, onCancel }) {
 
   const camera = useCamera(phase === 'scanning');
   const sessionRef = useRef(null);
+  const startedRef = useRef(false);
 
   // `useCamera` returns a fresh object every render, so depending on it would
   // tear down and restart the frame loop on every progress update. `capture`
@@ -31,13 +39,17 @@ export function Verify({ merchantId, onDone, onCancel }) {
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
 
+  // 1. Open the session.
   useEffect(() => {
-    let cancelled = false;
+    // StrictMode runs mount effects twice in development. Without this guard
+    // that means two /verify/start calls per attempt, and an orphaned session
+    // left behind on the ML service each time.
+    if (startedRef.current) return;
+    startedRef.current = true;
 
     api
       .startVerification({ merchantId, deviceId: 'web-kiosk' })
       .then((started) => {
-        if (cancelled) return;
         sessionRef.current = started;
         setLiveness({
           prompt: started.prompt,
@@ -50,24 +62,18 @@ export function Verify({ merchantId, onDone, onCancel }) {
         setPhase('scanning');
       })
       .catch((cause) => {
-        if (cancelled) return;
         setError(cause.message);
         setPhase('error');
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [merchantId]);
 
+  // 2. Stream frames until the challenge settles.
   useEffect(() => {
     if (phase !== 'scanning' || cameraStatus !== 'ready') return undefined;
 
     let stopped = false;
 
     (async () => {
-      let outcome = null;
-
       while (!stopped) {
         const image = capture();
         if (!image) {
@@ -81,8 +87,11 @@ export function Verify({ merchantId, onDone, onCancel }) {
 
           setLiveness(result);
           if (result.status !== 'in_progress') {
-            outcome = result;
-            break;
+            // Hand off by setting phase and returning immediately. Anything
+            // awaited past this point would run in a scope React has already
+            // cleaned up.
+            setPhase(result.status === 'passed' ? 'identifying' : 'rejected');
+            return;
           }
         } catch (cause) {
           if (stopped) return;
@@ -91,29 +100,34 @@ export function Verify({ merchantId, onDone, onCancel }) {
           return;
         }
       }
-
-      if (stopped || !outcome) return;
-
-      if (outcome.status !== 'passed') {
-        setPhase('rejected');
-        return;
-      }
-
-      setPhase('identifying');
-      try {
-        const result = await api.match(sessionRef.current.sessionId);
-        if (!stopped) onDoneRef.current(result);
-      } catch (cause) {
-        if (stopped) return;
-        setError(cause.message);
-        setPhase('error');
-      }
     })();
 
     return () => {
       stopped = true;
     };
   }, [phase, cameraStatus, capture]);
+
+  // 3. Identify, in its own effect so nothing cancels it out from under itself.
+  useEffect(() => {
+    if (phase !== 'identifying') return undefined;
+
+    let cancelled = false;
+
+    api
+      .match(sessionRef.current.sessionId)
+      .then((result) => {
+        if (!cancelled) onDoneRef.current(result);
+      })
+      .catch((cause) => {
+        if (cancelled) return;
+        setError(cause.message);
+        setPhase('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [phase]);
 
   if (phase === 'error') {
     return (
@@ -152,32 +166,38 @@ export function Verify({ merchantId, onDone, onCancel }) {
     );
   }
 
+  // The camera is released the moment scanning ends, so there is no preview to
+  // show while matching runs. Leaving the empty stage up read as a frozen
+  // screen — which is what a blank black rectangle always reads as.
+  if (phase === 'identifying') {
+    return (
+      <div className="screen">
+        <div className="card verdict">
+          <div className="spinner" />
+          <h2>Working out who you are</h2>
+          <p className="muted">Comparing against everyone enrolled.</p>
+        </div>
+      </div>
+    );
+  }
+
   const total = liveness?.totalSteps ?? 2;
   const step = liveness?.stepIndex ?? 0;
-  const identifying = phase === 'identifying';
 
   return (
     <div className="screen">
       <CameraStage camera={camera}>
         <span className={`pill${liveness?.faceDetected ? '' : ' warn'}`}>
           <i className="dot live" />
-          {identifying
-            ? 'Identifying'
-            : liveness?.faceDetected
-              ? 'Live'
-              : 'Looking for you'}
+          {liveness?.faceDetected ? 'Live' : 'Looking for you'}
         </span>
 
         <div>
-          <p className="prompt">
-            {identifying ? 'Who is this…' : (liveness?.prompt ?? 'Get ready')}
-          </p>
+          <p className="prompt">{liveness?.prompt ?? 'Get ready'}</p>
           <p className="prompt-hint">
-            {identifying
-              ? 'Comparing against everyone enrolled'
-              : liveness?.faceDetected
-                ? 'Follow the prompt'
-                : 'Centre your face in the frame'}
+            {liveness?.faceDetected
+              ? 'Follow the prompt'
+              : 'Centre your face in the frame'}
           </p>
 
           <div className="track">
