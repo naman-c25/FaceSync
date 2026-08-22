@@ -34,8 +34,21 @@ class Settings(BaseSettings):
     # is ambiguous about who is actually paying.
     max_faces_in_frame: int = 1
 
-    # Laplacian variance below this means the frame is too blurry to trust.
+    # Laplacian variance below this means the frame is too blurry to embed.
+    # Applies to enrollment samples and to the frame finally matched against.
     min_sharpness: float = 45.0
+
+    # A much lower floor for liveness, because the two need different things.
+    # MediaPipe finds landmarks far below the embedding threshold — measured on
+    # one face: sharpness 51.8 gave EAR 0.257 and sharpness 10.1 gave 0.219,
+    # against 0.271 unblurred. Below roughly 8 the geometry becomes noise
+    # (sharpness 4.4 read EAR 0.163 on the same face).
+    #
+    # Using the embedding threshold here was a false-rejection bug: turning to
+    # follow a "look right" prompt motion-blurs the frames mid-turn, all of
+    # them were discarded before detection, and a run of discarded frames read
+    # as the face having left.
+    min_sharpness_liveness: float = 8.0
 
     # ------------------------------------------------------------------
     # Liveness — blink detection (EAR)

@@ -228,6 +228,47 @@ def test_matching_is_refused_until_liveness_passes(client):
     assert "liveness" in response.json()["detail"]
 
 
+def test_motion_blur_does_not_read_as_the_face_leaving(client, faces):
+    """The false rejection a real webcam session hit.
+
+    Turning to follow a "look right" prompt motion-blurs the frames mid-turn.
+    Those were being discarded by the embedding-quality gate before detection
+    ran, and a run of discarded frames read as the face having left — so a user
+    doing exactly what was asked failed with `face_lost`.
+
+    Liveness needs landmarks, not sharpness, and MediaPipe finds them well
+    below the threshold recognition requires.
+    """
+    session_id = client.post("/verify/start").json()["session_id"]
+    blurred = _to_b64(cv2.GaussianBlur(faces[0], (9, 9), 0))
+
+    for _ in range(settings.max_consecutive_missing_face + 5):
+        body = client.post(
+            "/verify/frame", json={"session_id": session_id, "image_b64": blurred}
+        ).json()
+
+    assert body["failure_reason"] != "face_lost"
+    assert body["face_detected"] is True, "a blurred face is still a face"
+
+
+def test_a_frame_blurred_past_usefulness_is_still_dropped(client, faces):
+    """The floor is lowered for liveness, not removed.
+
+    Far below the liveness threshold the landmark geometry is noise, and
+    scoring it would invent blinks out of nothing.
+    """
+    session_id = client.post("/verify/start").json()["session_id"]
+    mush = _to_b64(cv2.GaussianBlur(faces[0], (61, 61), 0))
+
+    for _ in range(settings.max_consecutive_missing_face + 2):
+        body = client.post(
+            "/verify/frame", json={"session_id": session_id, "image_b64": mush}
+        ).json()
+
+    assert body["face_detected"] is False
+    assert body["failure_reason"] == "face_lost"
+
+
 def test_a_still_frame_makes_no_liveness_progress(client, faces):
     """A held photo satisfies no action, whatever the challenge happens to be."""
     session_id = client.post("/verify/start").json()["session_id"]

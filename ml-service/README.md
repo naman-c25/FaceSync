@@ -159,6 +159,23 @@ its first few frames and requires the signal to move away from it, which a
 fixed pose cannot do. An API test caught exactly this: a cropped face from a
 group photo passed a look step until the check became relative.
 
+**Liveness and recognition need different frame quality.** Recognition needs a
+sharp frame; liveness needs landmarks, and MediaPipe finds those far below the
+embedding threshold. Measured on one face: sharpness 51.8 still gave EAR 0.257
+and sharpness 10.1 gave 0.219, against 0.271 unblurred.
+
+Applying the embedding threshold (`min_sharpness`, 45) to liveness frames was a
+false-rejection bug found in a real webcam session. Turning to follow a "look
+right" prompt motion-blurs the frames mid-turn; every one was discarded before
+detection ran, and the state machine read that run as the face having left. A
+user doing exactly what was asked failed with `face_lost` — which is a false
+rejection, and lands directly in the FRR being measured.
+
+Liveness now uses `min_sharpness_liveness` (8), low enough for motion blur and
+high enough to stop landmark noise inventing blinks. The sharp frame is still
+required where it matters: the best frame of a session is re-checked against
+`min_sharpness` before it becomes the probe.
+
 **EAR is only read on a roughly frontal face.** EAR divides eyelid height by
 the eye's corner-to-corner width, and that width foreshortens as the head turns
 while the height barely does. So a turning head drives EAR wherever the

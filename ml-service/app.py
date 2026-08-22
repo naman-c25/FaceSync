@@ -106,23 +106,25 @@ app = FastAPI(
 # -- shared frame handling ---------------------------------------------
 
 
-def _prepare_frame(request: FrameRequest) -> tuple[np.ndarray | None, str | None, float]:
-    """Decode and condition one frame.
+def _prepare_frame(
+    request: FrameRequest,
+) -> tuple[np.ndarray | None, preprocessing.FrameQuality]:
+    """Decode and condition one frame, without judging whether to keep it.
 
-    Returns (frame, rejection_reason, sharpness). Enrollment and verification
-    both go through here so that a face is preprocessed identically at both
-    ends — CLAHE applied during enrollment but not verification would shift the
+    Only genuinely undecodable bytes fail here. Whether a frame is *good
+    enough* depends on what it is for, and the two callers disagree — so that
+    decision belongs to them, not to this function.
+
+    Both go through here so a face is preprocessed identically at both ends.
+    CLAHE applied during enrollment but not verification would shift the
     embeddings apart and quietly wreck every similarity score.
     """
     image = preprocessing.decode_image(request.image_bytes)
     if image is None:
-        return None, "undecodable_image", 0.0
+        return None, preprocessing.FrameQuality(False, 0.0, 0.0, "undecodable_image")
 
     quality = preprocessing.assess_frame(image)
-    if not quality.acceptable:
-        return None, quality.reason, quality.sharpness
-
-    return preprocessing.normalize_lighting(image), None, quality.sharpness
+    return preprocessing.normalize_lighting(image), quality
 
 
 def _single_usable_face(
@@ -190,15 +192,18 @@ def enroll_capture(request: FrameRequest) -> EnrollmentCaptureResponse:
     if len(session.samples) >= settings.max_enrollment_samples:
         raise HTTPException(status_code=409, detail="enrollment already has enough samples")
 
-    frame, reason, sharpness = _prepare_frame(request)
-    if frame is None:
+    # Enrollment applies the quality gate strictly. The user is standing right
+    # there, so asking for another frame costs a second — whereas a soft sample
+    # averaged into the stored identity degrades every future match.
+    frame, quality = _prepare_frame(request)
+    if frame is None or not quality.acceptable:
         session.rejected_frames += 1
         return EnrollmentCaptureResponse(
             accepted=False,
             samples_collected=len(session.samples),
             samples_required=settings.min_enrollment_samples,
-            reason=reason,
-            sharpness=round(sharpness, 2),
+            reason=quality.reason,
+            sharpness=round(quality.sharpness, 2),
         )
 
     face, reason = _single_usable_face(frame)
@@ -209,7 +214,7 @@ def enroll_capture(request: FrameRequest) -> EnrollmentCaptureResponse:
             samples_collected=len(session.samples),
             samples_required=settings.min_enrollment_samples,
             reason=reason,
-            sharpness=round(sharpness, 2),
+            sharpness=round(quality.sharpness, 2),
         )
 
     session.samples.append(face.embedding)
@@ -217,7 +222,7 @@ def enroll_capture(request: FrameRequest) -> EnrollmentCaptureResponse:
         accepted=True,
         samples_collected=len(session.samples),
         samples_required=settings.min_enrollment_samples,
-        sharpness=round(sharpness, 2),
+        sharpness=round(quality.sharpness, 2),
         detection_score=round(face.det_score, 4),
     )
 
@@ -299,11 +304,28 @@ def verify_frame(request: FrameRequest) -> VerifyFrameResponse:
     if session.liveness.status is not LivenessStatus.IN_PROGRESS:
         return _verify_response(session, face_detected=False)
 
-    frame, _, sharpness = _prepare_frame(request)
-    geometry = face_detection.analyse(frame) if frame is not None else None
+    # No quality gate here, deliberately. The sharpness threshold exists to
+    # protect embedding quality, and liveness does not need a sharp frame —
+    # MediaPipe finds landmarks in a moderately blurred one perfectly well.
+    #
+    # Applying it here was a false-rejection bug. Following a "look right"
+    # prompt motion-blurs the frames during the turn; every one was discarded
+    # before detection ran, and the state machine read that run of discarded
+    # frames as the face having left. A user doing exactly what the prompt
+    # asked failed the challenge with `face_lost`.
+    #
+    # A frame too soft to embed still cannot become the probe: sharpness feeds
+    # the best-frame score, and _extract_probe checks it again.
+    frame, quality = _prepare_frame(request)
+    usable = frame is not None and quality.sharpness >= settings.min_sharpness_liveness
+    geometry = face_detection.analyse(frame) if usable else None
 
-    if frame is not None and geometry is not None:
-        session.offer_frame(frame, frame_quality_score(geometry, sharpness))
+    if usable and geometry is not None:
+        session.offer_frame(
+            frame,
+            frame_quality_score(geometry, quality.sharpness),
+            sharpness=quality.sharpness,
+        )
 
     session.liveness.submit_frame(geometry)
 
@@ -316,6 +338,14 @@ def verify_frame(request: FrameRequest) -> VerifyFrameResponse:
 def _extract_probe(session: VerificationSession) -> None:
     """Embed the best frame of the session, once liveness has passed."""
     if session.probe_embedding is not None or session.best_frame is None:
+        return
+
+    # The gate liveness skipped, applied to the one frame that matters. If the
+    # whole session was blurred, the sharpest frame in it is still too soft to
+    # embed, and matching against it would produce a score that means nothing.
+    if session.best_frame_sharpness < settings.min_sharpness:
+        session.liveness.status = LivenessStatus.FAILED
+        session.liveness.failure_reason = "no_matchable_frame:frame_too_blurry"
         return
 
     face, reason = _single_usable_face(session.best_frame)

@@ -52,17 +52,25 @@ class VerificationSession:
     last_seen_at: float = field(default_factory=time.monotonic)
     best_frame: np.ndarray | None = None
     best_frame_score: float = 0.0
+    best_frame_sharpness: float = 0.0
     probe_embedding: np.ndarray | None = None
 
     def is_expired(self) -> bool:
         return time.monotonic() - self.last_seen_at > settings.session_ttl_seconds
 
-    def offer_frame(self, frame: np.ndarray, score: float) -> bool:
-        """Keep this frame if it beats the best one seen so far."""
+    def offer_frame(self, frame: np.ndarray, score: float, *, sharpness: float) -> bool:
+        """Keep this frame if it beats the best one seen so far.
+
+        Sharpness is carried alongside the composite score so the winner can be
+        checked against the embedding threshold later. Liveness accepts frames
+        far softer than recognition should, and without this the sharpest of a
+        uniformly blurred session would still be embedded.
+        """
         if score <= self.best_frame_score:
             return False
         self.best_frame = frame.copy()
         self.best_frame_score = score
+        self.best_frame_sharpness = sharpness
         return True
 
 
