@@ -80,6 +80,16 @@ const verificationLogSchema = new mongoose.Schema(
       // 3fps failed because it was undersampled, not because a threshold is
       // wrong — without this the two are indistinguishable in the log.
       effectiveFps: { type: Number, default: null },
+      // The measured extremes, not just the threshold that was applied. Without
+      // the floor a blink actually reached there is no way to tell a threshold
+      // that was set too low from a blink that was never sampled - and tuning
+      // one when the problem is the other makes things worse.
+      earMin: { type: Number, default: null },
+      earMax: { type: Number, default: null },
+      gazeMin: { type: Number, default: null },
+      gazeMax: { type: Number, default: null },
+      yawMin: { type: Number, default: null },
+      yawMax: { type: Number, default: null },
       earOpenBaseline: { type: Number, default: null },
       earThresholdUsed: { type: Number, default: null },
       elapsedSeconds: { type: Number, default: null },

@@ -81,6 +81,12 @@ function livenessFields(signals, { passed, failureReason = null } = {}) {
     // The number that separates "the threshold is wrong" from "the blink was
     // never sampled". Below about 8fps a 250ms blink falls between frames.
     effectiveFps: signals.effective_fps,
+    earMin: signals.ear_min,
+    earMax: signals.ear_max,
+    gazeMin: signals.gaze_min,
+    gazeMax: signals.gaze_max,
+    yawMin: signals.yaw_min,
+    yawMax: signals.yaw_max,
     earOpenBaseline: signals.ear_open_baseline,
     earThresholdUsed: signals.ear_threshold_used,
     elapsedSeconds: signals.elapsed_seconds,
