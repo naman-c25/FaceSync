@@ -22,15 +22,20 @@ import { decryptEmbedding } from './encryption.js';
  * alternative — asking for a phone number — is the thing this project exists
  * to avoid.
  *
- * Narrowing does trade recall for speed, and this implementation keeps the
- * trade small by never excluding a user who has no locality of their own yet.
- * It cannot cover every case: someone who enrolled in one city and pays in
- * another, having already established a locality, would fall outside the
- * narrowed pool. A production system answers that with a tiered search —
- * query the narrow pool, and widen on a miss rather than rejecting — which is
- * a second round trip this does not yet make.
+ * Narrowing trades recall for speed, and the trade is not small. Measured
+ * against a real gallery: with 2,000 identities enrolled, a customer walking
+ * into a shop they had never used before fell outside the narrowed pool at
+ * eight out of nine real users, because paying anywhere at all gives you a
+ * `knownMerchants` entry and that disqualifies you from the "no locality yet"
+ * clause below. Visiting a new shop is not an edge case, it is most customers
+ * most of the time — and the symptom is being told to register again by a
+ * system you are already registered with.
+ *
+ * So narrowing is only ever the first tier. `identifyFromSession` widens to
+ * the whole gallery when the narrow pool comes back with no match, which is
+ * what `narrow: false` is for. Nothing here may reject a customer on its own.
  */
-export async function buildCandidatePool({ merchantId, region } = {}) {
+export async function buildCandidatePool({ merchantId, region, narrow = true } = {}) {
   const activeSince = new Date(
     Date.now() - config.CANDIDATE_POOL_ACTIVE_DAYS * 24 * 60 * 60 * 1000,
   );
@@ -44,7 +49,7 @@ export async function buildCandidatePool({ merchantId, region } = {}) {
   // Below this size every active user is a candidate, which is both correct
   // and — at a few hundred vectors — a sub-millisecond comparison anyway.
   const activeCount = await User.countDocuments(query);
-  const shouldNarrow = activeCount > config.CANDIDATE_POOL_NARROW_ABOVE;
+  const shouldNarrow = narrow && activeCount > config.CANDIDATE_POOL_NARROW_ABOVE;
 
   if (shouldNarrow) {
     // Region and merchant history are an *either*, not an *and*: a regular

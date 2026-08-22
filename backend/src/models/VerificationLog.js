@@ -100,6 +100,14 @@ const verificationLogSchema = new mongoose.Schema(
     // identity that is already enrolled, for no benefit.
     probeEmbedding: { type: Buffer, default: null, select: false },
 
+    // Whether the narrowed candidate pool answered, or the search had to widen
+    // to the whole gallery to find this person. A rising share of widened
+    // matches means the narrowing rule is excluding people it should not, and
+    // without this the only symptom would be customers being told to register
+    // again by a system they are already registered with.
+    poolNarrowed: { type: Boolean, default: false },
+    poolWidened: { type: Boolean, default: false },
+
     processingTimeMs: { type: Number, default: null },
     error: { type: String, default: null },
   },

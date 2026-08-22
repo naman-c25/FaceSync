@@ -37,7 +37,43 @@ export async function identifyFromSession(session, { completeOnMatch = true } = 
     );
   }
 
-  const result = await mlService.match(session.mlSessionId, gallery);
+  let result = await mlService.match(session.mlSessionId, gallery);
+  let widened = false;
+
+  // Second tier. A narrowed pool that comes back empty-handed has not
+  // established that this person is unenrolled — only that they are not one of
+  // the locals. Rejecting there is how a customer who is registered, and has
+  // simply walked into a different shop, gets told to register again.
+  //
+  // Only on `no_match`. An `ambiguous` result means the pool already held two
+  // faces too close to separate, and adding thousands more can only make that
+  // worse.
+  //
+  // Run through `compare` rather than `match` because the ML service discards
+  // its verification session the moment it answers, so there is no second
+  // match to make. The probe from the first pass is reused, which also means
+  // this cannot become a way to match a face that never passed liveness.
+  if (narrowed && result.decision === 'no_match') {
+    const wide = await buildCandidatePool({ narrow: false });
+
+    if (wide.gallery.length > gallery.length) {
+      const second = await mlService.compare(result.probe_embedding_b64, wide.gallery);
+
+      if (second.decision !== 'no_match') {
+        result = {
+          ...second,
+          // `compare` knows nothing about the session that produced the probe,
+          // so the liveness evidence and the probe itself carry over from the
+          // first pass. Losing them would leave an audit row that could not say
+          // whether a live person was ever present.
+          probe_embedding_b64: result.probe_embedding_b64,
+          signals: result.signals,
+        };
+        widened = true;
+      }
+    }
+  }
+
   const matchedUser =
     result.decision === 'matched' ? await User.findById(result.user_id) : null;
 
@@ -76,6 +112,8 @@ export async function identifyFromSession(session, { completeOnMatch = true } = 
     },
     liveness: livenessFields(result.signals),
     probeEmbedding,
+    poolNarrowed: narrowed,
+    poolWidened: widened,
     processingTimeMs: Date.now() - startedAt,
   });
 
@@ -88,7 +126,7 @@ export async function identifyFromSession(session, { completeOnMatch = true } = 
     }).catch((cause) => console.error('[identify] failed to record sighting', cause));
   }
 
-  return { result, matchedUser, log, narrowed };
+  return { result, matchedUser, log, narrowed, widened };
 }
 
 export function livenessFields(signals, { passed = true, failureReason = null } = {}) {
