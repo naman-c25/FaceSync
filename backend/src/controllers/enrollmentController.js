@@ -131,6 +131,12 @@ export async function finalizeEnrollment(req, res) {
   // a second one. Two near-identical entries sit well inside the match margin
   // of each other, so from then on every attempt by that person comes back
   // ambiguous — one accidental re-enrollment locks them out permanently.
+  // The name on an existing record is deliberately left alone. Someone who
+  // registers a face that is already on file gets that record's face data
+  // refreshed — which is the useful part of registering again — but cannot
+  // rename it. Overwriting would mean anyone able to present your face could
+  // silently relabel your account, and it would quietly hide the case worth
+  // seeing: the same face arriving under a second name.
   const user = existing
     ? await User.findByIdAndUpdate(
         existing.userId,
@@ -138,7 +144,6 @@ export async function finalizeEnrollment(req, res) {
           $set: {
             embedding: encryptEmbedding(embedding),
             enrollment,
-            displayName: session.displayName,
             lastSeenAt: new Date(),
             ...(session.region ? { homeRegion: session.region } : {}),
           },
@@ -157,13 +162,21 @@ export async function finalizeEnrollment(req, res) {
   session.completed = true;
   await session.save();
 
+  const nameGiven = session.displayName;
+  const nameOnFile = user.displayName;
+
   res.status(201).json({
     userId: String(user._id),
-    displayName: user.displayName,
-    // The kiosk says something different for a returning face, and the caller
+    displayName: nameOnFile,
+    // The kiosk shows something different for a returning face, and the caller
     // should not have to infer which happened from the status code.
     updatedExisting: Boolean(existing),
     matchedScore: existing?.score ?? null,
+    // True when the same face came back under a different name. Worth calling
+    // out on screen: from the person's side it looks like a failed
+    // registration unless they are told the face was already known.
+    nameDiffers: Boolean(existing) && nameGiven !== nameOnFile,
+    nameGiven,
     enrollment: {
       samplesUsed: result.samples_used,
       meanSimilarity: result.mean_similarity,

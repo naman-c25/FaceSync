@@ -86,18 +86,39 @@ export default function App() {
     body = (
       <div className="screen">
         <div className="card verdict">
-          <div className="badge">✓</div>
+          <div className={`badge${enrolled.updatedExisting ? ' unsure' : ''}`}>
+            {enrolled.updatedExisting ? '!' : '✓'}
+          </div>
           <h2>
             {enrolled.updatedExisting
-              ? 'Registration updated'
+              ? 'You have registered before'
               : 'You are registered'}
           </h2>
           <p className="muted">
             {enrolled.updatedExisting
-              ? 'We recognised you from an earlier registration and replaced it, rather than adding a second copy.'
+              ? `We recognised your face from an existing registration, under the name ${enrolled.displayName}. Your face data has been refreshed rather than stored a second time.`
               : `${enrolled.enrollment.samplesUsed} samples became one encrypted signature. No image of you was kept.`}
           </p>
         </div>
+
+        {enrolled.nameDiffers && (
+          <p className="note warn">
+            You entered <strong>{enrolled.nameGiven}</strong>, but this face is
+            already registered as <strong>{enrolled.displayName}</strong>. The
+            name on file was left as it is — a face that is already known
+            cannot be renamed by registering again.
+          </p>
+        )}
+
+        {enrolled.updatedExisting && (
+          <p className="note">
+            Matched your existing registration at{' '}
+            <strong>{enrolled.matchedScore?.toFixed(3)}</strong> similarity.
+            Storing a second copy would leave two near-identical faces in the
+            system — after which neither could be told from the other, and you
+            could not be identified at all.
+          </p>
+        )}
 
         {weak && (
           <p className="note warn">

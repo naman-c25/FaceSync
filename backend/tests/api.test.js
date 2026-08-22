@@ -154,6 +154,81 @@ describe('enrollment', () => {
     assert.equal(await User.countDocuments(), 1, 'no second copy may be created');
   });
 
+  it('will not let a returning face rename the record it matched', async () => {
+    // Overwriting would mean anyone able to present your face could silently
+    // relabel your account, and it would hide the case worth seeing.
+    await enrol({ displayName: 'Original Name' });
+
+    ctx.ml.state.duplicateScore = 0.94;
+    const again = await ctx.request('POST', '/api/enroll/start', {
+      displayName: 'Different Name',
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await ctx.request('POST', '/api/enroll/capture', {
+        sessionId: again.body.sessionId,
+        image: FAKE_FRAME,
+      });
+    }
+    const done = await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId: again.body.sessionId,
+    });
+
+    assert.equal(done.body.displayName, 'Original Name');
+    assert.equal(done.body.nameDiffers, true, 'the kiosk has to be able to say so');
+    assert.equal(done.body.nameGiven, 'Different Name');
+
+    const stored = await User.findById(done.body.userId).lean();
+    assert.equal(stored.displayName, 'Original Name');
+  });
+
+  it('refreshes the stored face data when someone registers again', async () => {
+    // The useful half of re-registering: a better capture replaces the old one.
+    const userId = await enrol({ displayName: 'Returning' });
+    const before = await User.findById(userId).select('+embedding').lean();
+
+    ctx.ml.state.duplicateScore = 0.9;
+    const again = await ctx.request('POST', '/api/enroll/start', {
+      displayName: 'Returning',
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await ctx.request('POST', '/api/enroll/capture', {
+        sessionId: again.body.sessionId,
+        image: FAKE_FRAME,
+      });
+    }
+    await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId: again.body.sessionId,
+    });
+
+    const after = await User.findById(userId).select('+embedding').lean();
+    // A fresh IV per encryption means the ciphertext differs even for
+    // identical input, so this only proves it was rewritten — which is the
+    // claim being made.
+    assert.notDeepEqual(after.embedding, before.embedding);
+    assert.ok(after.enrollment.completedAt > before.enrollment.completedAt);
+  });
+
+  it('does not flag a name difference when the name is the same', async () => {
+    await enrol({ displayName: 'Same Name' });
+
+    ctx.ml.state.duplicateScore = 0.92;
+    const again = await ctx.request('POST', '/api/enroll/start', {
+      displayName: 'Same Name',
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await ctx.request('POST', '/api/enroll/capture', {
+        sessionId: again.body.sessionId,
+        image: FAKE_FRAME,
+      });
+    }
+    const done = await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId: again.body.sessionId,
+    });
+
+    assert.equal(done.body.updatedExisting, true);
+    assert.equal(done.body.nameDiffers, false);
+  });
+
   it('creates a separate record for a face nobody has registered', async () => {
     await enrol({ displayName: 'First Person' });
 
