@@ -1,3 +1,7 @@
+import { existsSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import express from 'express';
 
 import { config } from './config/index.js';
@@ -64,8 +68,45 @@ export function createApp() {
   app.use('/api/enroll', enrollmentRoutes);
   app.use('/api/verify', verificationRoutes);
 
+  serveFrontendIfBuilt(app);
+
   app.use(notFound);
   app.use(errorHandler);
 
   return app;
+}
+
+/**
+ * Serve the built kiosk from this process, when it is present.
+ *
+ * Optional on purpose. Locally the Vite dev server owns the frontend and this
+ * does nothing. Deployed, dropping `frontend/dist` here means one origin for
+ * everything — no CORS, no second host to keep awake, and one URL to share.
+ */
+function serveFrontendIfBuilt(app) {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'public');
+  if (!existsSync(join(root, 'index.html'))) return;
+
+  // Hashed asset filenames are safe to cache hard; index.html must not be, or
+  // a redeploy leaves people on a stale page pointing at assets that are gone.
+  app.use(
+    express.static(root, {
+      index: false,
+      setHeaders(res, filePath) {
+        // Compared by path segment rather than by substring: the separator is
+        // a backslash on Windows, so a check for "assets/" silently never
+        // matches there and every asset is served uncached.
+        if (basename(dirname(filePath)) === 'assets') {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }),
+  );
+
+  app.get(/^\/(?!api\/|health$).*/, (_req, res) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(join(root, 'index.html'));
+  });
+
+  console.log('[api] serving the kiosk from backend/public');
 }

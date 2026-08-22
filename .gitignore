@@ -32,3 +32,7 @@ Thumbs.db
 
 # Vite build output
 frontend/dist/
+
+# Built kiosk staged into the API service. The Docker build produces this;
+# committing build output would only let it drift from the source.
+backend/public/

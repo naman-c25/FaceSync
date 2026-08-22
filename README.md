@@ -1,3 +1,14 @@
+---
+title: FacePay
+emoji: 🫆
+colorFrom: green
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Pay with your face - no phone, no card, no app
+---
+
 # FacePay
 
 Pay at a shop without a phone, a card, or an app. Walk up, and the camera works
@@ -76,7 +87,7 @@ python tools/kiosk_demo.py verify --merchant shop-1
 
 ```bash
 cd ml-service && pytest         # 90
-cd backend && npm test          # 44
+cd backend && npm test          # 50
 ```
 
 The liveness state machine is tested against synthetic landmark geometry, so
@@ -123,6 +134,17 @@ Each of these looked like a working system until something specific caught it.
 - **Blinks would have gone undetected over a network.** Thresholds were frame
   counts, which only mean anything at a fixed frame rate. At the 5-8fps a
   browser achieves, a 200ms blink spans one frame. They are milliseconds now.
+
+## Deploying
+
+`DEPLOY.md` walks through it. Short version: MongoDB Atlas for the database,
+and one Hugging Face Space for everything else — the root `Dockerfile` builds
+the kiosk, the API and the ML service into a single image.
+
+The API and the ML service are deployed together on purpose. Every liveness
+frame travels browser → Node → Python → back, so splitting them across hosts
+adds a network hop to each of the 20-30 frames in one verification, and the
+frame rate is what blink detection depends on.
 
 ## Not built yet
 

@@ -1,0 +1,22 @@
+# Local environments — the image installs its own.
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+
+# Models are fetched during the build, not copied from a dev machine.
+ml-service/models/
+
+# Never bake secrets into an image.
+**/.env
+**/*.local
+
+# Raw test captures are biometric images and have no business in a deployed
+# image, let alone a public one.
+test-data/
+
+# Build artefacts and noise.
+frontend/dist/
+**/*.log
+.git/
+.gitignore
