@@ -53,17 +53,30 @@ def encode(frame) -> str:
 
 
 def post(path: str, payload: dict) -> dict:
+    # Drop keys with no value rather than sending an explicit null. The API
+    # accepts either, but omitting them keeps the request honest about what the
+    # caller actually knows.
+    body = {key: value for key, value in payload.items() if value is not None}
+
     try:
-        response = requests.post(f"{API}{path}", json=payload, timeout=20)
+        response = requests.post(f"{API}{path}", json=body, timeout=20)
     except requests.RequestException as exc:
         raise SystemExit(f"\nCannot reach the API at {API}: {exc}") from exc
 
-    if response.status_code >= 400:
-        body = response.json() if response.content else {}
-        detail = body.get("error", {}).get("message", response.text)
-        raise SystemExit(f"\n{path} failed ({response.status_code}): {detail}")
+    if response.status_code < 400:
+        return response.json()
 
-    return response.json()
+    error = (response.json() if response.content else {}).get("error", {})
+    message = error.get("message", response.text)
+
+    # A validation failure names the offending fields, and printing only the
+    # summary throws that away — leaving "Request body failed validation" with
+    # nothing to act on.
+    detail = "".join(
+        f"\n    {issue.get('field') or '(body)'}: {issue.get('message')}"
+        for issue in error.get("issues", [])
+    )
+    raise SystemExit(f"\n{path} failed ({response.status_code}): {message}{detail}")
 
 
 def overlay(frame, lines: list[tuple[str, tuple[int, int, int], float]]) -> None:

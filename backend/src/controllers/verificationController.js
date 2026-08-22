@@ -9,10 +9,13 @@ import { buildCandidatePool, recordSighting } from '../services/candidatePool.js
 import { encryptEmbedding } from '../services/encryption.js';
 import { mlService } from '../services/mlServiceClient.js';
 
+// `.nullish()`, not `.optional()` — a client with nothing to send for a field
+// sends `null` rather than dropping the key. See the note in
+// enrollmentController for why that is worth accepting.
 const startSchema = z.object({
   merchantId: z.string().trim().min(1).max(80),
-  deviceId: z.string().trim().max(80).optional(),
-  region: z.string().trim().max(80).optional(),
+  deviceId: z.string().trim().max(80).nullish(),
+  region: z.string().trim().max(80).nullish(),
 });
 
 const frameSchema = z.object({

@@ -105,6 +105,30 @@ describe('enrollment', () => {
     assert.equal(capture.body.reason, 'frame_too_blurry');
   });
 
+  it('accepts explicit nulls for the fields that are optional', async () => {
+    // What a client sends when it has nothing for a field. Rejecting it made
+    // the whole webcam demo unusable, with a validation error that named no
+    // field to fix.
+    const response = await ctx.request('POST', '/api/enroll/start', {
+      displayName: 'Test Subject',
+      region: null,
+      merchantId: null,
+    });
+
+    assert.equal(response.status, 201);
+  });
+
+  it('names the offending field when validation fails', async () => {
+    // "Request body failed validation" on its own is not actionable.
+    const response = await ctx.request('POST', '/api/enroll/start', {
+      displayName: '',
+    });
+
+    assert.equal(response.status, 400);
+    assert.ok(response.body.error.issues.length > 0);
+    assert.equal(response.body.error.issues[0].field, 'displayName');
+  });
+
   it('rejects a request with no display name', async () => {
     const response = await ctx.request('POST', '/api/enroll/start', {});
 
@@ -209,6 +233,16 @@ describe('verification', () => {
     const again = await ctx.request('POST', '/api/verify/match', { sessionId });
 
     assert.equal(again.status, 409);
+  });
+
+  it('accepts explicit nulls for optional verification fields', async () => {
+    const response = await ctx.request('POST', '/api/verify/start', {
+      merchantId: 'shop-1',
+      deviceId: null,
+      region: null,
+    });
+
+    assert.equal(response.status, 201);
   });
 
   it('reports a liveness failure and closes the session', async () => {

@@ -6,10 +6,15 @@ import { encryptEmbedding } from '../services/encryption.js';
 import { mlService } from '../services/mlServiceClient.js';
 import { ApiError } from '../middleware/errorHandler.js';
 
+// `.nullish()` rather than `.optional()` on every optional field. A JSON
+// client that has nothing to send for a field naturally sends `null` rather
+// than omitting the key — hand-written clients do it, and so does anything
+// serialising a struct with empty members. Rejecting that is pedantry, and it
+// produces a validation error that reads as though the request were malformed.
 const startSchema = z.object({
   displayName: z.string().trim().min(1).max(120),
-  region: z.string().trim().max(80).optional(),
-  merchantId: z.string().trim().max(80).optional(),
+  region: z.string().trim().max(80).nullish(),
+  merchantId: z.string().trim().max(80).nullish(),
 });
 
 const captureSchema = z.object({
@@ -22,7 +27,7 @@ const finalizeSchema = z.object({
   recoveryDigits: z
     .string()
     .regex(/^\d{4}$/, 'recoveryDigits must be exactly 4 digits')
-    .optional(),
+    .nullish(),
 });
 
 async function loadSession(sessionId, kind) {
