@@ -92,6 +92,7 @@ class LivenessSignals:
     frames_without_face: int = 0
     frames_ear_unusable: int = 0
     blinks_detected: int = 0
+    longest_blink_ms: float = 0.0
     ear_min: float | None = None
     ear_max: float | None = None
     ear_open_baseline: float | None = None
@@ -156,9 +157,9 @@ class LivenessSession:
         self.last_seen_at = self.created_at
 
         self._consecutive_missing = 0
-        self._eyes_closed_run = 0
+        self._closed_since: float | None = None
         self._blinks_this_step = 0
-        self._gaze_hold_run = 0
+        self._gaze_held_since: float | None = None
         self._baseline: tuple[float, float] | None = None
         self._baseline_samples: list[tuple[float, float]] = []
         self._ear_open: float | None = None
@@ -185,14 +186,22 @@ class LivenessSession:
         """Current progress, without consuming a frame."""
         return self._outcome()
 
-    def submit_frame(self, geometry: FaceGeometry | None) -> FrameOutcome:
-        """Advance the state machine by one frame."""
+    def submit_frame(
+        self, geometry: FaceGeometry | None, now: float | None = None
+    ) -> FrameOutcome:
+        """Advance the state machine by one frame.
+
+        `now` exists so tests can drive the clock. Blink and gaze thresholds
+        are measured in milliseconds rather than frames, and synthetic frames
+        fed in a tight loop would otherwise all land at the same instant.
+        """
         if self.status is not LivenessStatus.IN_PROGRESS:
             return self._outcome()
 
-        self.last_seen_at = time.monotonic()
+        now = time.monotonic() if now is None else now
+        self.last_seen_at = now
         self.signals.frames_processed += 1
-        self.signals.elapsed_seconds = round(self.last_seen_at - self.created_at, 3)
+        self.signals.elapsed_seconds = round(now - self.created_at, 3)
 
         if self._budget_exhausted():
             return self._outcome()
@@ -208,9 +217,9 @@ class LivenessSession:
             return self._finish(LivenessStatus.PASSED)
 
         completed = (
-            self._advance_blink(step, geometry)
+            self._advance_blink(step, geometry, now)
             if step.action is ActionType.BLINK
-            else self._advance_gaze(step, geometry)
+            else self._advance_gaze(step, geometry, now)
         )
 
         if completed:
@@ -238,7 +247,7 @@ class LivenessSession:
         # interrupted by the face vanishing is not a hold, and a rest position
         # measured before the gap says nothing about whatever is in front of
         # the lens after it.
-        self._gaze_hold_run = 0
+        self._gaze_held_since = None
         self._baseline = None
         self._baseline_samples = []
 
@@ -263,7 +272,9 @@ class LivenessSession:
             return settings.ear_threshold
         return settings.ear_closed_fraction * self._ear_open
 
-    def _advance_blink(self, step: ChallengeStep, geometry: FaceGeometry) -> bool:
+    def _advance_blink(
+        self, step: ChallengeStep, geometry: FaceGeometry, now: float
+    ) -> bool:
         """Count blinks by watching EAR fall and come back up.
 
         A blink is scored on the *rising* edge, not while the eyes are shut,
@@ -280,7 +291,7 @@ class LivenessSession:
         if not geometry.ear_is_meaningful:
             # Not a blink and not evidence against one — drop the frame and
             # abandon any closure in progress, since its end cannot be seen.
-            self._eyes_closed_run = 0
+            self._closed_since = None
             self.signals.frames_ear_unusable += 1
             return False
 
@@ -295,22 +306,32 @@ class LivenessSession:
             return False
 
         if geometry.ear < self._blink_threshold():
-            self._eyes_closed_run += 1
+            if self._closed_since is None:
+                self._closed_since = now
             return False
 
-        closed_for = self._eyes_closed_run
-        self._eyes_closed_run = 0
+        closed_since, self._closed_since = self._closed_since, None
+        if closed_since is None:
+            return False  # the eyes were already open
 
-        within_blink_duration = (
-            settings.ear_consec_frames <= closed_for <= settings.ear_max_closed_frames
-        )
-        if within_blink_duration:
+        # Measured from the first closed frame to the first open one. It
+        # slightly overstates the closure, since it began some time before that
+        # first frame caught it, but that error shrinks as the frame rate rises
+        # and never turns noise into a blink.
+        closed_ms = (now - closed_since) * 1000.0
+
+        if settings.blink_min_ms <= closed_ms <= settings.blink_max_ms:
             self._blinks_this_step += 1
             self.signals.blinks_detected += 1
+            self.signals.longest_blink_ms = max(
+                self.signals.longest_blink_ms, round(closed_ms, 1)
+            )
 
         return self._blinks_this_step >= step.count
 
-    def _advance_gaze(self, step: ChallengeStep, geometry: FaceGeometry) -> bool:
+    def _advance_gaze(
+        self, step: ChallengeStep, geometry: FaceGeometry, now: float
+    ) -> bool:
         """Score a look step on movement away from the rest position.
 
         The first few frames of the step establish where this person's head and
@@ -362,14 +383,19 @@ class LivenessSession:
             gaze_shift >= settings.gaze_delta or yaw_shift >= settings.yaw_delta
         )
 
-        self._gaze_hold_run = self._gaze_hold_run + 1 if satisfied else 0
-        return self._gaze_hold_run >= settings.gaze_hold_frames
+        if not satisfied:
+            self._gaze_held_since = None
+            return False
+
+        if self._gaze_held_since is None:
+            self._gaze_held_since = now
+        return (now - self._gaze_held_since) * 1000.0 >= settings.gaze_hold_ms
 
     def _begin_next_step(self) -> None:
         self.step_index += 1
         self._blinks_this_step = 0
-        self._gaze_hold_run = 0
-        self._eyes_closed_run = 0
+        self._gaze_held_since = None
+        self._closed_since = None
 
         # Each step re-measures rest, because the previous step almost
         # certainly left the head somewhere other than where it started.
@@ -424,7 +450,10 @@ class LivenessSession:
             return 1.0
         if step.action is ActionType.BLINK:
             return min(self._blinks_this_step / step.count, 1.0)
-        return min(self._gaze_hold_run / settings.gaze_hold_frames, 1.0)
+        if self._gaze_held_since is None:
+            return 0.0
+        held_ms = (time.monotonic() - self._gaze_held_since) * 1000.0
+        return min(held_ms / settings.gaze_hold_ms, 1.0)
 
     def _outcome(self) -> FrameOutcome:
         return FrameOutcome(

@@ -6,6 +6,7 @@ No camera, no model, no fixtures to record.
 """
 
 import sys
+from math import ceil
 from pathlib import Path
 
 import numpy as np
@@ -52,9 +53,43 @@ def geometry(
     )
 
 
-def feed(session: LivenessSession, frames: list[FaceGeometry | None]) -> None:
+# Blink and gaze thresholds are measured in milliseconds, so the tests advance
+# a clock rather than relying on wall time. 40ms per frame is 25fps — a normal
+# local capture rate.
+FRAME_MS = 40.0
+
+
+class Clock:
+    """A fake monotonic clock the tests step forward frame by frame."""
+
+    def __init__(self, step_ms: float = FRAME_MS) -> None:
+        self.now = 1000.0
+        self.step_ms = step_ms
+
+    def tick(self) -> float:
+        self.now += self.step_ms / 1000.0
+        return self.now
+
+
+def feed(
+    session: LivenessSession,
+    frames: list[FaceGeometry | None],
+    clock: Clock | None = None,
+) -> Clock:
+    """Submit frames, advancing the clock one step per frame.
+
+    The clock is kept on the session so that several `feed` calls in one test
+    read as one continuous capture. A fresh clock per call would rewind time
+    between them, which the state machine sees as a closure that ended before
+    it began.
+    """
+    if clock is None:
+        clock = getattr(session, "_test_clock", None) or Clock()
+        session._test_clock = clock
+
     for frame in frames:
-        session.submit_frame(frame)
+        session.submit_frame(frame, now=clock.tick())
+    return clock
 
 
 def eyes_open_baseline(ear: float = EYES_OPEN) -> list[FaceGeometry]:
@@ -62,9 +97,19 @@ def eyes_open_baseline(ear: float = EYES_OPEN) -> list[FaceGeometry]:
     return [geometry(ear=ear)] * settings.ear_baseline_frames
 
 
+# Frames needed to span each time threshold at FRAME_MS. Derived rather than
+# hardcoded so the tests follow the config instead of drifting from it.
+#
+# The closure is measured from the first closed frame to the first open one, so
+# N closed frames measures N * FRAME_MS. The gaze timer starts on the first
+# satisfied frame and reads zero there, hence the extra frame.
+CLOSED_FRAMES = max(2, ceil(settings.blink_min_ms / FRAME_MS))
+GAZE_FRAMES = ceil(settings.gaze_hold_ms / FRAME_MS) + 1
+
+
 def blink_frames(count: int, open_ear: float = EYES_OPEN) -> list[FaceGeometry]:
     """Baseline, then eyes shut long enough to register, then open again."""
-    closed = [geometry(ear=open_ear * 0.2)] * settings.ear_consec_frames
+    closed = [geometry(ear=open_ear * 0.2)] * CLOSED_FRAMES
     opened = [geometry(ear=open_ear)] * 2
     return eyes_open_baseline(open_ear) + (closed + opened) * count
 
@@ -77,7 +122,7 @@ def at_rest(count: int | None = None) -> list[FaceGeometry]:
 
 def eye_move_frames(shift: float, count: int | None = None) -> list[FaceGeometry]:
     """Rest, then the eyes swivel by `shift` from it."""
-    count = settings.gaze_hold_frames if count is None else count
+    count = GAZE_FRAMES if count is None else count
     return at_rest() + [geometry(gaze=GAZE_CENTRE + shift)] * count
 
 
@@ -87,7 +132,7 @@ def head_turn_frames(shift: float, count: int | None = None) -> list[FaceGeometr
     This is what a head turn looks like to the mesh: the iris keeps its
     position between the eye corners, so the gaze ratio does not move at all.
     """
-    count = settings.gaze_hold_frames if count is None else count
+    count = GAZE_FRAMES if count is None else count
     return at_rest() + [geometry(gaze=GAZE_CENTRE, yaw=HEAD_SQUARE + shift)] * count
 
 
@@ -105,7 +150,7 @@ def test_blink_challenge_passes_on_required_blinks():
 def test_blink_is_counted_only_when_the_eyes_reopen():
     """A closure still in progress is not yet a blink."""
     session = LivenessSession("s2", [ChallengeStep(ActionType.BLINK, count=1)])
-    feed(session, [geometry(ear=EYES_SHUT)] * settings.ear_consec_frames)
+    feed(session, [geometry(ear=EYES_SHUT)] * CLOSED_FRAMES)
 
     assert session.status is LivenessStatus.IN_PROGRESS
     assert session.signals.blinks_detected == 0
@@ -118,6 +163,67 @@ def test_single_frame_dip_is_not_a_blink():
 
     assert session.signals.blinks_detected == 0
     assert session.status is LivenessStatus.IN_PROGRESS
+
+
+@pytest.mark.parametrize("fps", [30, 25, 15, 10, 6, 4])
+def test_a_blink_is_detected_at_any_frame_rate(fps):
+    """The reason the thresholds are in milliseconds rather than frames.
+
+    A browser streaming frames to a server runs at whatever the round trip
+    allows — often 5-8fps against 30 locally. A frame-counted threshold tuned
+    on a laptop misses every blink over a network, because a 200ms closure
+    spans fewer than two frames there.
+
+    A deliberate blink on cue lasts roughly 200-300ms; 200 is used here as the
+    hard case.
+    """
+    frame_ms = 1000.0 / fps
+    clock = Clock(step_ms=frame_ms)
+    session = LivenessSession("fps", [ChallengeStep(ActionType.BLINK, count=1)])
+
+    feed(session, eyes_open_baseline(), clock)
+
+    closed_frames = max(1, round(200.0 / frame_ms))
+    feed(session, [geometry(ear=EYES_SHUT)] * closed_frames, clock)
+    feed(session, [geometry(ear=EYES_OPEN)] * 3, clock)
+
+    assert session.signals.blinks_detected == 1, (
+        f"a 200ms blink went undetected at {fps}fps"
+    )
+
+
+@pytest.mark.parametrize("fps", [30, 10, 4])
+def test_noise_is_not_a_blink_at_any_frame_rate(fps):
+    """The other half — the window must not widen into accepting jitter.
+
+    One stray frame is a real closure at 4fps and landmark noise at 30, and
+    measuring time rather than frames is what tells them apart.
+    """
+    frame_ms = 1000.0 / fps
+    clock = Clock(step_ms=frame_ms)
+    session = LivenessSession("noise", [ChallengeStep(ActionType.BLINK, count=1)])
+
+    feed(session, eyes_open_baseline(), clock)
+    # Alternating single frames: at 30fps each dip lasts 33ms, well under the
+    # blink window; at 4fps a single frame genuinely is 250ms of closure.
+    feed(session, [geometry(ear=EYES_SHUT), geometry(ear=EYES_OPEN)] * 8, clock)
+
+    expected_a_blink = frame_ms >= settings.blink_min_ms
+    assert (session.signals.blinks_detected > 0) is expected_a_blink
+
+
+def test_eyes_held_shut_are_not_a_blink_at_any_frame_rate():
+    """A photo of closed eyes must not pass however slowly frames arrive."""
+    for fps in (30, 10, 4):
+        clock = Clock(step_ms=1000.0 / fps)
+        session = LivenessSession("held", [ChallengeStep(ActionType.BLINK, count=1)])
+
+        feed(session, eyes_open_baseline(), clock)
+        held_frames = ceil((settings.blink_max_ms + 400) / clock.step_ms)
+        feed(session, [geometry(ear=EYES_SHUT)] * held_frames, clock)
+        feed(session, [geometry(ear=EYES_OPEN)] * 3, clock)
+
+        assert session.signals.blinks_detected == 0, f"held eyes counted at {fps}fps"
 
 
 # Open-eye and blink-floor EAR measured from five people with the webcam tool.
@@ -139,7 +245,7 @@ def test_real_measured_blinks_are_detected(open_eye, blink_floor):
 
     feed(session, eyes_open_baseline(open_eye))
     for _ in range(2):
-        feed(session, [geometry(ear=blink_floor)] * settings.ear_consec_frames)
+        feed(session, [geometry(ear=blink_floor)] * CLOSED_FRAMES)
         feed(session, [geometry(ear=open_eye)] * 2)
 
     assert session.status is LivenessStatus.PASSED, (
@@ -205,7 +311,7 @@ def test_the_open_eye_baseline_survives_into_later_steps():
     measured = session.signals.ear_open_baseline
 
     # No fresh baseline window — the second step blinks immediately.
-    feed(session, [geometry(ear=EYES_SHUT)] * settings.ear_consec_frames)
+    feed(session, [geometry(ear=EYES_SHUT)] * CLOSED_FRAMES)
     feed(session, [geometry(ear=EYES_OPEN)] * 2)
 
     assert session.status is LivenessStatus.PASSED
@@ -248,7 +354,7 @@ def test_a_blink_still_counts_at_a_normal_head_angle():
     session = LivenessSession("slight", [ChallengeStep(ActionType.BLINK, count=1)])
 
     feed(session, [geometry(ear=EYES_OPEN, yaw=slight)] * settings.ear_baseline_frames)
-    closed = [geometry(ear=EYES_SHUT, yaw=slight)] * settings.ear_consec_frames
+    closed = [geometry(ear=EYES_SHUT, yaw=slight)] * CLOSED_FRAMES
     feed(session, closed + [geometry(ear=EYES_OPEN, yaw=slight)] * 2)
 
     assert session.signals.blinks_detected == 1
@@ -273,7 +379,7 @@ def test_a_closure_interrupted_by_a_head_turn_is_not_a_blink():
     profile = 0.5 - (settings.min_frontality_for_blink / 2.0) - 0.05
     session = LivenessSession("interrupted", [ChallengeStep(ActionType.BLINK, count=1)])
 
-    feed(session, [geometry(ear=EYES_SHUT)] * settings.ear_consec_frames)
+    feed(session, [geometry(ear=EYES_SHUT)] * CLOSED_FRAMES)
     feed(session, [geometry(ear=EYES_SHUT, yaw=profile)] * 3)
     feed(session, [geometry(ear=EYES_OPEN)] * 3)
 
@@ -294,7 +400,7 @@ def test_ear_signals_are_logged_only_from_usable_frames():
 def test_eyes_held_shut_never_counts_as_a_blink():
     """A photo of someone with closed eyes must not pass as blinking."""
     session = LivenessSession("s4", [ChallengeStep(ActionType.BLINK, count=1)])
-    held = settings.ear_max_closed_frames + 3
+    held = ceil(settings.blink_max_ms / FRAME_MS) + 3
     feed(session, [geometry(ear=EYES_SHUT)] * held + [geometry(ear=EYES_OPEN)])
 
     assert session.signals.blinks_detected == 0
@@ -381,7 +487,7 @@ def test_losing_the_face_resets_gaze_progress():
     """Progress must not survive a gap the attacker could swap something into."""
     session = LivenessSession("s9", [ChallengeStep(ActionType.LOOK_LEFT)])
     moved = [geometry(gaze=GAZE_CENTRE + settings.gaze_delta + 0.05)] * (
-        settings.gaze_hold_frames - 1
+        GAZE_FRAMES - 1
     )
 
     feed(session, at_rest() + moved)

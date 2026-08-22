@@ -89,13 +89,20 @@ class Settings(BaseSettings):
     # geometry says — a hard backstop for frames the frontality gate misses.
     ear_plausible_range: tuple[float, float] = (0.05, 0.60)
 
-    # A blink must span at least this many consecutive frames below threshold.
-    # Guards against single-frame noise being counted as a blink.
-    ear_consec_frames: int = 2
+    # A blink is a duration, not a number of frames, and the two only agree at
+    # a fixed frame rate. A browser streaming frames to a server runs at
+    # whatever the round trip allows — often 5-8fps against 30 locally — and a
+    # frame-counted threshold that works on a laptop misses every blink over a
+    # network, because a 150ms closure spans fewer than two frames there.
+    #
+    # Measuring the closure in milliseconds holds at any rate: at 30fps a real
+    # blink covers several frames and still measures ~150ms, while a
+    # single-frame dip measures ~33ms and is correctly read as noise.
+    blink_min_ms: float = 60.0
 
-    # ...and no more than this many, otherwise the user simply has their eyes
-    # closed (or it is a photo of someone with closed eyes) rather than blinking.
-    ear_max_closed_frames: int = 12
+    # Beyond this the eyes are being held shut rather than blinked — or it is a
+    # photo of someone with their eyes closed.
+    blink_max_ms: float = 700.0
 
     blinks_required: int = 2
 
@@ -138,9 +145,10 @@ class Settings(BaseSettings):
     # the single switch to flip — do not go rewriting the gaze comparisons.
     frames_are_mirrored: bool = False
 
-    # How many frames must satisfy the gaze direction before it counts as held.
-    # A replayed video will rarely hit the randomly-chosen direction on cue.
-    gaze_hold_frames: int = 3
+    # How long the direction must be held before it counts. Time-based for the
+    # same reason as the blink window — a frame count means different things on
+    # a laptop and over a network.
+    gaze_hold_ms: float = 250.0
 
     # ------------------------------------------------------------------
     # Liveness — session limits
