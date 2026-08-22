@@ -62,7 +62,18 @@ export function createApp() {
       ml.error = error.message;
     }
 
-    res.status(ml.reachable ? 200 : 503).json({ status: 'ok', mlService: ml });
+    // `models_loaded` has to count, not just reachability. A container with a
+    // missing native library starts fine, answers this endpoint, and fails
+    // every liveness check — and a health check that returns 200 through that
+    // tells the platform to keep sending traffic to it. This exact case
+    // happened: MediaPipe dlopen()s libEGL lazily, so the image built and the
+    // service ran while face detection was dead.
+    const healthy = ml.reachable && ml.models_loaded === true;
+
+    res.status(healthy ? 200 : 503).json({
+      status: healthy ? 'ok' : 'degraded',
+      mlService: ml,
+    });
   });
 
   app.use('/api/enroll', enrollmentRoutes);

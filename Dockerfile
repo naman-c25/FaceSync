@@ -28,11 +28,21 @@ RUN npm run build
 # --- runtime --------------------------------------------------------------
 FROM python:3.12-slim
 
-# Node for the API layer; libgl/libglib are what OpenCV links against even
-# headless; curl backs the healthcheck and the startup wait.
+# Node for the API layer, plus the native libraries the Python side dlopen()s.
+#
+# libgl1 and libglib2.0-0 are OpenCV's, even headless. libegl1 and libgles2 are
+# MediaPipe's, and they are easy to miss: it loads them lazily when the first
+# FaceLandmarker is created, so the image builds, the service starts, and
+# /health answers — while every liveness check fails with
+# "libEGL.so.1: cannot open shared object file". Leaving them out ships a
+# container that looks healthy and cannot detect a face.
+#
+# To check after a MediaPipe upgrade, rather than adding one library per failed
+# build:
+#   ldd .../site-packages/mediapipe/tasks/c/libmediapipe.so | grep "not found"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl ca-certificates gnupg libgl1 libglib2.0-0 \
+        curl ca-certificates gnupg libgl1 libglib2.0-0 libegl1 libgles2 \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*

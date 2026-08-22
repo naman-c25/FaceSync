@@ -55,6 +55,28 @@ async function verifyUntilReady({ merchantId = 'shop-1', region } = {}) {
   return start.body.sessionId;
 }
 
+describe('health', () => {
+  it('reports degraded when the ML service has no models loaded', async () => {
+    // The failure this exists for: a container missing a native library starts
+    // fine and answers this endpoint while every liveness check fails. A 200
+    // through that tells the platform to keep routing traffic to it.
+    ctx.ml.state.modelsLoaded = false;
+
+    const response = await ctx.request('GET', '/health');
+
+    assert.equal(response.status, 503);
+    assert.equal(response.body.status, 'degraded');
+    assert.equal(response.body.mlService.models_loaded, false);
+  });
+
+  it('reports degraded when the ML service is unreachable', async () => {
+    ctx.ml.state.failNextRequest = { status: 500, detail: 'down' };
+
+    const response = await ctx.request('GET', '/health');
+    assert.equal(response.status, 503);
+  });
+});
+
 describe('enrollment', () => {
   it('stores an encrypted embedding, never a raw one', async () => {
     const userId = await enrol();

@@ -23,6 +23,7 @@ export function createFakeMlService({ port = 8099 } = {}) {
     runnerUpScore: 0.31,
     enrollmentAccepts: true,
     duplicateScore: 0.05,
+    modelsLoaded: true,
     failNextRequest: null, // { status, detail }
     delayMs: 0,
     requests: [],
@@ -140,9 +141,14 @@ export function createFakeMlService({ port = 8099 } = {}) {
     };
 
     if (req.method === 'GET' && req.url === '/health') {
+      if (state.failNextRequest) {
+        const { status, detail } = state.failNextRequest;
+        state.failNextRequest = null;
+        return send(status, { detail });
+      }
       return send(200, {
         status: 'ok',
-        models_loaded: true,
+        models_loaded: state.modelsLoaded,
         active_enrollment_sessions: 0,
         active_verification_sessions: 0,
       });
@@ -185,6 +191,7 @@ export function createFakeMlService({ port = 8099 } = {}) {
         runnerUpScore: 0.31,
         enrollmentAccepts: true,
         duplicateScore: 0.05,
+        modelsLoaded: true,
         failNextRequest: null,
         delayMs: 0,
         requests: [],

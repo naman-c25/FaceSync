@@ -48,21 +48,36 @@ Keep the laptop plugged in and stop it from sleeping while people are using it.
 
 ## When you need it always-on
 
-The ML service is the whole constraint: roughly a gigabyte of models in memory.
-That rules out most free tiers, which cap at 512MB.
+### What it actually needs — measured, not guessed
 
-| host | memory | cost | notes |
+The image was built and run, and these are the numbers off a real container
+doing real enrollments:
+
+| | |
+|---|---|
+| image size | ~3.5GB |
+| memory, idle | 585MB |
+| memory, after enrollments | 792MB |
+| **memory to provision** | **2GB** |
+
+1GB looks like it fits and does not: 792MB leaves 23% headroom, which two
+people using it at once would eat. 512MB free tiers — Render, Fly, Koyeb — are
+not close.
+
+| host | memory available | cost | notes |
 |---|---|---|---|
-| **Google Cloud Run** | 2GB | free tier covers a demo | scales to zero, HTTPS included, needs a card on file |
+| **Google Cloud Run** | 2GB+ | free tier covers a demo | scales to zero, HTTPS included, needs a card on file |
 | Railway | 8GB | $5 credit/month | easiest deploy of the three |
-| Oracle Cloud | 24GB | free forever | ARM, and you set up HTTPS yourself |
+| Oracle Cloud | 24GB | free forever | ARM, so the image needs rebuilding for it, and you set up HTTPS yourself |
 | Render / Koyeb / Fly free | 512MB | free | **will not load the models** |
 
 ### Google Cloud Run
 
-Closest to a free lunch that actually works. The free tier is 2M requests and
-180,000 vCPU-seconds a month, which a demo does not come near. A card is
-required, but nothing is charged inside those limits.
+Closest to a free lunch that actually works. The free tier is 2M requests,
+360,000 GiB-seconds of memory and 180,000 vCPU-seconds a month. At 2GB that is
+roughly 50 hours of active compute — and since it scales to zero, idle time
+does not count against it. A demo does not come near the limit. A card is
+required, but nothing is charged inside it.
 
 ```bash
 # install the gcloud CLI first: cloud.google.com/sdk
@@ -153,8 +168,19 @@ Prefix with `MONGODB_URI=...` to run against a deployed database.
 
 ## When something is wrong
 
-**`mlService.reachable: false`** — the Python service is not running, or the
-backend is pointed at the wrong `ML_SERVICE_URL`.
+**`/health` returns 503 with `models_loaded: false`** — the Python service is
+running but its models did not load. In a container this is almost always a
+missing native library: MediaPipe `dlopen()`s libEGL and libGLESv2 lazily, so
+the image builds and the service starts before anything notices. To find what
+is missing after a MediaPipe upgrade:
+
+```bash
+LIB=/usr/local/lib/python3.12/site-packages/mediapipe/tasks/c/libmediapipe.so
+docker exec <container> ldd "$LIB" | grep "not found"
+```
+
+**`mlService.reachable: false`** — the Python service is not running at all, or
+the backend is pointed at the wrong `ML_SERVICE_URL`.
 
 **Everything returns `no_match`** — nobody is enrolled, or you are looking at a
 different database than you think.
