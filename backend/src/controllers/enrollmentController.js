@@ -5,6 +5,7 @@ import { Session } from '../models/Session.js';
 import { User } from '../models/User.js';
 import { buildCandidatePool } from '../services/candidatePool.js';
 import { encryptEmbedding } from '../services/encryption.js';
+import { hashPin, rejectWeakPin } from '../services/pin.js';
 import { mlService } from '../services/mlServiceClient.js';
 import { ApiError } from '../middleware/errorHandler.js';
 
@@ -37,6 +38,14 @@ const finalizeSchema = z.object({
   recoveryDigits: z
     .string()
     .regex(/^\d{4}$/, 'recoveryDigits must be exactly 4 digits')
+    .nullish(),
+
+  // The knowledge factor. Optional here so someone can lend their face to the
+  // dataset without setting one; a payment then tells them plainly that a PIN
+  // is needed rather than failing for no stated reason.
+  pin: z
+    .string()
+    .regex(/^\d{4}$/, 'A PIN must be exactly four digits')
     .nullish(),
 });
 
@@ -115,6 +124,13 @@ export async function finalizeEnrollment(req, res) {
   const body = finalizeSchema.parse(req.body);
   const session = await loadSession(body.sessionId, 'enrollment');
 
+  // Checked before anything is written, so a weak PIN does not leave a
+  // half-finished registration behind.
+  if (body.pin) {
+    const weak = rejectWeakPin(body.pin);
+    if (weak) throw new ApiError(400, weak, 'weak_pin');
+  }
+
   const result = await mlService.finalizeEnrollment(session.mlSessionId);
   const embedding = Buffer.from(result.embedding_b64, 'base64');
 
@@ -146,6 +162,9 @@ export async function finalizeEnrollment(req, res) {
             enrollment,
             lastSeenAt: new Date(),
             ...(session.region ? { homeRegion: session.region } : {}),
+            // A returning face may set a PIN it did not have, or replace one.
+            // Omitting it leaves the existing PIN alone rather than clearing it.
+            ...(body.pin ? { pinHash: hashPin(body.pin), pinFailures: 0, pinLockedUntil: null } : {}),
           },
         },
         { new: true },
@@ -157,6 +176,7 @@ export async function finalizeEnrollment(req, res) {
         homeRegion: session.region,
         knownMerchants: session.merchantId ? [session.merchantId] : [],
         recoveryDigits: body.recoveryDigits ?? null,
+        pinHash: body.pin ? hashPin(body.pin) : null,
       });
 
   session.completed = true;
@@ -171,6 +191,8 @@ export async function finalizeEnrollment(req, res) {
     // The kiosk shows something different for a returning face, and the caller
     // should not have to infer which happened from the status code.
     updatedExisting: Boolean(existing),
+    // Whether this identity can complete a payment, which needs both factors.
+    hasPin: Boolean(user.pinHash ?? body.pin),
     matchedScore: existing?.score ?? null,
     // True when the same face came back under a different name. Worth calling
     // out on screen: from the person's side it looks like a failed

@@ -52,8 +52,8 @@ export const api = {
   startEnrollment: (body) => post('/api/enroll/start', body),
   captureSample: (sessionId, image) =>
     post('/api/enroll/capture', { sessionId, image }),
-  finalizeEnrollment: (sessionId) =>
-    post('/api/enroll/finalize', { sessionId }),
+  finalizeEnrollment: (sessionId, pin) =>
+    post('/api/enroll/finalize', { sessionId, pin }),
 
   startVerification: (body) => post('/api/verify/start', body),
   submitFrames: (sessionId, frames) =>

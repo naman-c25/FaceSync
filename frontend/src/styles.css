@@ -563,3 +563,50 @@ footer {
 .tag-failed {
   color: var(--danger);
 }
+
+/* ---------- PIN entry ---------- */
+
+.pin-dots {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.pin-dots span {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.pin-dots span.filled {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.key {
+  padding: 18px 0;
+  border-radius: 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 21px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: transform 0.1s ease, background 0.12s ease;
+}
+.key:active {
+  transform: scale(0.96);
+  background: var(--line);
+}
+.key-quiet {
+  font-size: 14px;
+  font-weight: 560;
+  color: var(--muted);
+}

@@ -62,7 +62,8 @@ async function request(method, path, body) {
 
   if (!response.ok) {
     // An expired or revoked session should drop the terminal back to the login
-    // screen rather than leaving it showing stale takings.
+    // screen rather than leaving it showing stale takings. Only 401 does this:
+    // a PIN lockout comes back as 423 and must not sign the merchant out.
     if (response.status === 401) tokenStore.clear();
 
     const error = payload?.error ?? {};
@@ -87,8 +88,10 @@ export const merchantApi = {
   stats: () => request('GET', '/api/merchant/stats'),
   transactions: (limit = 25) =>
     request('GET', `/api/merchant/transactions?limit=${limit}`),
-  charge: (sessionId, amount) =>
-    request('POST', '/api/merchant/charge', { sessionId, amount }),
+  // `pin` is absent on the first call: the till cannot ask whose PIN to enter
+  // until the face has been identified, so the flow is scan, prompt, charge.
+  charge: (sessionId, amount, pin) =>
+    request('POST', '/api/merchant/charge', { sessionId, amount, pin }),
 };
 
 export { MerchantApiError };

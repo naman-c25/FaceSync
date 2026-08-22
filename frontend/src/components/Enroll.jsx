@@ -17,6 +17,7 @@ const COUNTDOWN_MS = 2600;
 export function Enroll({ onDone, onCancel }) {
   const [phase, setPhase] = useState('name');
   const [name, setName] = useState('');
+  const [pin, setPin] = useState('');
   const [session, setSession] = useState(null);
   const [collected, setCollected] = useState(0);
   const [rejection, setRejection] = useState(null);
@@ -32,6 +33,8 @@ export function Enroll({ onDone, onCancel }) {
   const { capture, status: cameraStatus } = camera;
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+  const pinRef = useRef('');
+  pinRef.current = pin || null;
 
   const start = async (event) => {
     event.preventDefault();
@@ -43,6 +46,8 @@ export function Enroll({ onDone, onCancel }) {
       setError(cause.message);
     }
   };
+
+  const pinValid = pin === '' || /^\d{4}$/.test(pin);
 
   const takeSample = useCallback(async () => {
     if (busy.current || !session) return;
@@ -57,7 +62,7 @@ export function Enroll({ onDone, onCancel }) {
 
       if (result.samplesCollected >= result.samplesRequired) {
         setPhase('finalising');
-        const done = await api.finalizeEnrollment(session.sessionId);
+        const done = await api.finalizeEnrollment(session.sessionId, pinRef.current);
         onDoneRef.current({ ...done, name: name.trim() });
       }
     } catch (cause) {
@@ -114,7 +119,29 @@ export function Enroll({ onDone, onCancel }) {
               required
             />
           </div>
-          <button className="btn btn-primary" disabled={!name.trim()}>
+          <div className="field">
+            <label htmlFor="pin">PIN (optional)</label>
+            <input
+              id="pin"
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              placeholder="4 digits"
+              value={pin}
+              onChange={(event) =>
+                setPin(event.target.value.replace(/\D/g, '').slice(0, 4))
+              }
+            />
+          </div>
+
+          <p className="note">
+            Your face says who you are; the PIN is how you approve a payment.
+            You can skip it and still be registered — you just cannot pay until
+            you set one. Come back and register again to add it later.
+          </p>
+
+          <button className="btn btn-primary" disabled={!name.trim() || !pinValid}>
             Start
           </button>
           {error && <p className="note bad">{error}</p>}

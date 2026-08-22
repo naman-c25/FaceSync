@@ -44,6 +44,24 @@ const sessionSchema = new mongoose.Schema(
     challenge: { type: [String], default: [] },
     completed: { type: Boolean, default: false },
 
+    // Who the face turned out to be, held between the two calls a payment
+    // takes. The till cannot prompt for a PIN until it knows whose to ask for,
+    // and the ML service discards its own session the moment it answers a
+    // match — so re-identifying on the second call is not an option.
+    identifiedUser: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    identifiedLog: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'VerificationLog',
+      default: null,
+    },
+    matchScore: { type: Number, default: null },
+    runnerUpScore: { type: Number, default: null },
+    gallerySize: { type: Number, default: null },
+
     expiresAt: {
       type: Date,
       required: true,

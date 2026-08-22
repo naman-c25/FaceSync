@@ -39,6 +39,17 @@ const userSchema = new mongoose.Schema(
       completedAt: { type: Date, default: Date.now },
     },
 
+    // The knowledge factor: hashed with a salt and a server-side pepper, never
+    // encrypted. See services/pin.js for why hashing is the only sensible
+    // choice for something nothing ever needs to read back.
+    pinHash: { type: String, default: null, select: false },
+
+    // What actually protects a four-digit PIN. Ten thousand possibilities is
+    // nothing to a computer, so the hash is not the defence — the lockout is,
+    // exactly as it is at a cash machine.
+    pinFailures: { type: Number, default: 0 },
+    pinLockedUntil: { type: Date, default: null },
+
     // Last four digits of a phone number, hashed. Used only to break a tie
     // when the face match is ambiguous — never to look anyone up, and never
     // enough on its own to identify. Optional, because the zero-touch path
@@ -70,6 +81,7 @@ const userSchema = new mongoose.Schema(
       transform(_doc, ret) {
         delete ret.embedding;
         delete ret.recoveryDigits;
+        delete ret.pinHash;
         delete ret.__v;
         return ret;
       },

@@ -23,8 +23,14 @@ export function Till({ merchant, onSignOut }) {
   const [liveness, setLiveness] = useState(null);
   const [outcome, setOutcome] = useState(null);
   const [error, setError] = useState(null);
+  const [pin, setPin] = useState('');
+  const [pinPrompt, setPinPrompt] = useState(null);
 
   const camera = useCamera(phase === 'scanning');
+  // Read through a ref so submitting a PIN does not re-run the charge effect
+  // on every keystroke.
+  const pinRef = useRef('');
+  pinRef.current = pin;
   const { capture, status: cameraStatus } = camera;
   const sessionRef = useRef(null);
 
@@ -114,9 +120,19 @@ export function Till({ merchant, onSignOut }) {
     let cancelled = false;
 
     merchantApi
-      .charge(sessionRef.current.sessionId, rupees)
+      .charge(sessionRef.current.sessionId, rupees, pinRef.current || null)
       .then((result) => {
         if (cancelled) return;
+
+        // Identified, but the second factor is still outstanding. The till
+        // could not have asked sooner — it did not know whose PIN to want.
+        if (result.needsPin) {
+          setPinPrompt(result);
+          setPin('');
+          setPhase('pin');
+          return;
+        }
+
         setOutcome(result);
         setPhase('done');
       })
@@ -133,6 +149,8 @@ export function Till({ merchant, onSignOut }) {
 
   const reset = useCallback(() => {
     setAmount('');
+    setPin('');
+    setPinPrompt(null);
     setLiveness(null);
     setOutcome(null);
     setError(null);
@@ -185,6 +203,19 @@ export function Till({ merchant, onSignOut }) {
           <p className="muted">Comparing against every enrolled customer.</p>
         </div>
       </div>
+    );
+  }
+
+  if (phase === 'pin') {
+    return (
+      <PinEntry
+        prompt={pinPrompt}
+        amount={rupees}
+        pin={pin}
+        onPin={setPin}
+        onSubmit={() => setPhase('charging')}
+        onCancel={reset}
+      />
     );
   }
 
@@ -256,30 +287,42 @@ export function Till({ merchant, onSignOut }) {
 
 function Outcome({ outcome, amount, onDone }) {
   if (!outcome.charged) {
+    // A refused payment has three quite different causes, and saying "not
+    // recognised" for all of them would be wrong twice over: a locked PIN
+    // means the face *was* recognised, and the customer should be told that
+    // rather than left thinking the camera failed to see them.
+    const kind = outcome.pinOutcome ?? outcome.decision;
+    const heading = {
+      locked: 'PIN locked',
+      no_pin_set: 'No PIN set',
+      ambiguous: 'Not certain enough',
+    }[kind] ?? 'Not recognised';
+
     return (
       <div className="screen">
         <div className="card verdict">
-          <div className={`badge ${outcome.decision === 'ambiguous' ? 'unsure' : 'fail'}`}>
-            {outcome.decision === 'ambiguous' ? '?' : '✕'}
+          <div className={`badge ${kind === 'ambiguous' || outcome.pinOutcome ? 'unsure' : 'fail'}`}>
+            {outcome.pinOutcome ? '!' : kind === 'ambiguous' ? '?' : '✕'}
           </div>
-          <h2>
-            {outcome.decision === 'ambiguous' ? 'Not certain enough' : 'Not recognised'}
-          </h2>
+          <h2>{heading}</h2>
+          {outcome.customer && (
+            <p className="muted">Recognised as {outcome.customer.name}.</p>
+          )}
           <p className="muted">{outcome.reason}</p>
         </div>
 
         <dl className="scores">
           <div>
             <dt>Best</dt>
-            <dd>{outcome.confidence.top?.toFixed(3) ?? '—'}</dd>
+            <dd>{outcome.confidence?.top?.toFixed(3) ?? '—'}</dd>
           </div>
           <div>
             <dt>Runner-up</dt>
-            <dd>{outcome.confidence.runnerUp?.toFixed(3) ?? '—'}</dd>
+            <dd>{outcome.confidence?.runnerUp?.toFixed(3) ?? '—'}</dd>
           </div>
           <div>
             <dt>Gap</dt>
-            <dd>{outcome.confidence.margin?.toFixed(3) ?? '—'}</dd>
+            <dd>{outcome.confidence?.margin?.toFixed(3) ?? '—'}</dd>
           </div>
         </dl>
 
@@ -296,7 +339,7 @@ function Outcome({ outcome, amount, onDone }) {
         <div className="badge">✓</div>
         <h2>₹{amount} from {outcome.customer.name}</h2>
         <p className="muted">
-          Identified by face alone. Nothing was presented at the till.
+          Face and PIN. Nothing was presented at the till — no phone, no card.
         </p>
       </div>
 
@@ -327,6 +370,69 @@ function Outcome({ outcome, amount, onDone }) {
 
       <button className="btn btn-primary" onClick={onDone}>
         Next customer
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The second factor, entered on the till after the face has been identified.
+ *
+ * Shown only once the customer is known, because the till cannot ask for a PIN
+ * until it knows whose to check against. Naming the customer here is also what
+ * makes the prompt make sense to them — they are confirming, not identifying.
+ */
+function PinEntry({ prompt, amount, pin, onPin, onSubmit, onCancel }) {
+  const press = (digit) => {
+    if (pin.length < 4) onPin(pin + digit);
+  };
+
+  const complete = pin.length === 4;
+
+  return (
+    <div className="screen">
+      <div className="card verdict">
+        <div className="badge">✓</div>
+        <h2>{prompt.customer.name}</h2>
+        <p className="muted">
+          Recognised. Enter your PIN to approve ₹{amount}.
+        </p>
+      </div>
+
+      {prompt.pinOutcome === 'wrong_pin' && (
+        <p className="note bad">
+          {prompt.reason}
+        </p>
+      )}
+
+      <div className="pin-dots">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} className={i < pin.length ? 'filled' : ''} />
+        ))}
+      </div>
+
+      <div className="keypad">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+          <button key={d} className="key" onClick={() => press(String(d))}>
+            {d}
+          </button>
+        ))}
+        <button className="key key-quiet" onClick={() => onPin('')}>
+          Clear
+        </button>
+        <button className="key" onClick={() => press('0')}>
+          0
+        </button>
+        <button className="key key-quiet" onClick={() => onPin(pin.slice(0, -1))}>
+          ⌫
+        </button>
+      </div>
+
+      <button className="btn btn-primary" disabled={!complete} onClick={onSubmit}>
+        {complete ? `Approve ₹${amount}` : 'Enter four digits'}
+      </button>
+      <button className="btn btn-ghost" onClick={onCancel}>
+        Cancel
       </button>
     </div>
   );

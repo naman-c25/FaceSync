@@ -19,7 +19,7 @@ import { mlService } from './mlServiceClient.js';
  * The caller is responsible for what happens next — this neither charges
  * anything nor decides whether the outcome is good enough to act on.
  */
-export async function identifyFromSession(session) {
+export async function identifyFromSession(session, { completeOnMatch = true } = {}) {
   const startedAt = Date.now();
   session.attempts += 1;
 
@@ -41,7 +41,7 @@ export async function identifyFromSession(session) {
   const matchedUser =
     result.decision === 'matched' ? await User.findById(result.user_id) : null;
 
-  session.completed = result.decision === 'matched';
+  session.completed = completeOnMatch && result.decision === 'matched';
   await session.save();
 
   // Retained only when the attempt did not resolve to an enrolled user — what
@@ -122,6 +122,10 @@ export async function loadVerificationSession(sessionId) {
   const session = await Session.findOne({ _id: sessionId, kind: 'verification' });
   if (!session || session.isExpired()) return { error: 'session_not_found' };
   if (session.completed) return { error: 'session_completed' };
+  // A session mid-payment has been identified but not finished. Its match
+  // attempt is spent; only the PIN step is left, so the attempt cap does not
+  // apply to it.
+  if (session.identifiedUser) return { session };
   if (session.attempts >= config.MAX_VERIFICATION_ATTEMPTS) {
     return { error: 'attempts_exhausted' };
   }
