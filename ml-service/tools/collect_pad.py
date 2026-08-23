@@ -40,6 +40,12 @@ Aim for roughly:
 Screen replay matters more than print in practice. Almost nobody prints a
 photograph any more; everybody has a phone.
 
+And capture on more than one camera if the detector is ever meant to work on
+more than one. Cross-camera is where these break: every sensor has its own
+colour science and its own sharpening, and a model trained on one learns what
+skin looks like *through that lens*. Three or four cameras is the cheapest fix
+there is, because each additional one forces the model toward what they share.
+
 Keys while it runs:  SPACE saves a frame,  a toggles autosave,  q quits.
 """
 
@@ -72,6 +78,13 @@ def main() -> int:
         required=True,
         help="lighting and setting, e.g. window / lamp / dim. Held out during "
         "evaluation, so be accurate rather than tidy.",
+    )
+    parser.add_argument(
+        "--device",
+        required=True,
+        help="which camera this is, e.g. laptop-webcam / redmi-front / logitech-c270. "
+        "Recorded because cross-camera is where a spoof detector actually breaks, "
+        "and without this label there is no way to find out that it has.",
     )
     parser.add_argument("--out", default="../benchmark-data/pad")
     parser.add_argument("--camera", type=int, default=0)
@@ -123,7 +136,8 @@ def main() -> int:
 
             cv2.putText(
                 view,
-                f"{args.label} | {args.person} | {args.condition} | saved {saved}"
+                f"{args.label} | {args.person} | {args.condition} | "
+                f"{args.device} | saved {saved}"
                 + ("  [AUTO]" if autosave else ""),
                 (12, 28),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -160,7 +174,7 @@ def main() -> int:
                     max(y1 - pad, 0) : y2 + pad, max(x1 - pad, 0) : x2 + pad
                 ]
 
-                name = f"{args.person}_{args.condition}_{saved:04d}.png"
+                name = f"{args.person}_{args.device}_{args.condition}_{saved:04d}.png"
                 cv2.imwrite(str(out / name), crop)
 
                 with index.open("a", encoding="utf-8") as handle:
@@ -171,6 +185,7 @@ def main() -> int:
                                 "label": args.label,
                                 "person": args.person,
                                 "condition": args.condition,
+                                "device": args.device,
                                 "det_score": round(float(face.det_score), 4),
                             }
                         )

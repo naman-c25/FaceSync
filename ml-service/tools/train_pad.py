@@ -21,15 +21,24 @@ train and test, and since consecutive frames of one capture are nearly
 identical, the score that comes back is a measure of how well the model
 memorised that person -- routinely 99% and completely meaningless.
 
-So two protocols run, and the second is the one that matters:
+So three protocols run, and the last is the one that decides whether this works
+anywhere but the desk it was captured on:
 
   leave-one-person-out     can it judge a face it has never seen?
   leave-one-condition-out  can it judge a light it was not trained in?
+  leave-one-camera-out     can it judge an image from a sensor it has not met?
 
 The second is where self-collected sets fall apart. If real and spoof samples
 were captured in different lighting, a classifier learns the lighting, scores
-brilliantly by person, and collapses by condition. That gap is the honest
-measure of whether this transfers or has simply memorised the room.
+brilliantly by person, and collapses by condition.
+
+The third is where published detectors fall apart, and it is the reason
+cross-dataset error rates in the literature are an order of magnitude worse
+than within-dataset ones. Every sensor has its own colour science and its own
+sharpening, so a detector can be excellent on unseen faces and useless on an
+unseen camera -- and only this protocol reveals it. Capturing on one camera
+means there is no cross-camera number at all, which the verdict says rather
+than quietly reporting the good ones.
 
     python tools/train_pad.py --data ../benchmark-data/pad
 """
@@ -55,8 +64,32 @@ LBP_RADIUS = 1
 BINS = LBP_POINTS + 2  # uniform patterns
 
 
-def features(image: np.ndarray) -> np.ndarray:
+def shades_of_grey(image: np.ndarray, power: int = 6) -> np.ndarray:
+    """Normalise away the camera's white balance, keeping the colour it saw.
+
+    This is the cheapest thing that attacks cross-camera failure at its cause.
+    Every sensor has its own colour science, and chroma-texture features pick
+    that up along with the attack -- so a model trained on one camera partly
+    learns what skin looks like *through that lens*. Estimating each image's own
+    illuminant and dividing it out removes most of that bias while leaving the
+    thing worth measuring: the difference between light scattered under skin and
+    light emitted by a display or reflected off ink.
+
+    Shades-of-grey with p=6 rather than plain grey-world, which is p=1 and
+    known to be worse. It sits between grey-world and max-RGB and is the usual
+    default.
+    """
+    channels = image.astype(np.float32) + 1e-6
+    illuminant = np.power(np.mean(np.power(channels, power), axis=(0, 1)), 1.0 / power)
+    illuminant = illuminant / (np.linalg.norm(illuminant) + 1e-6)
+    corrected = channels / (illuminant * np.sqrt(3) + 1e-6)
+    return np.clip(corrected, 0, 255).astype(np.uint8)
+
+
+def features(image: np.ndarray, normalise: bool = True) -> np.ndarray:
     """Chroma-texture descriptor for one face crop."""
+    if normalise:
+        image = shades_of_grey(image)
     face = cv2.resize(image, (CROP, CROP), interpolation=cv2.INTER_AREA)
 
     histograms = []
@@ -74,7 +107,7 @@ def features(image: np.ndarray) -> np.ndarray:
     return np.concatenate(histograms).astype(np.float32)
 
 
-def load(root: Path):
+def load(root: Path, normalise: bool = True):
     index = root / "index.jsonl"
     if not index.is_file():
         print(f"no index at {index} -- run collect_pad.py first", file=sys.stderr)
@@ -85,19 +118,28 @@ def load(root: Path):
     print(Counter(r["label"] for r in rows))
     print(Counter(r["person"] for r in rows))
     print(Counter(r["condition"] for r in rows))
+    print(Counter(r.get("device", "unlabelled") for r in rows))
 
-    X, y, people, conditions = [], [], [], []
+    X, y, people, conditions, devices = [], [], [], [], []
     for row in rows:
         image = cv2.imread(str(root / row["file"]))
         if image is None:
             continue
-        X.append(features(image))
+        X.append(features(image, normalise=normalise))
         # Everything that is not a live face is an attack, whatever kind.
         y.append(0 if row["label"] == "real" else 1)
         people.append(row["person"])
         conditions.append(row["condition"])
+        # Older captures predate the device label; they all came from one camera.
+        devices.append(row.get("device", "unlabelled"))
 
-    return np.stack(X), np.asarray(y), np.asarray(people), np.asarray(conditions)
+    return (
+        np.stack(X),
+        np.asarray(y),
+        np.asarray(people),
+        np.asarray(conditions),
+        np.asarray(devices),
+    )
 
 
 def model() -> object:
@@ -159,12 +201,19 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data", default="../benchmark-data/pad")
+    parser.add_argument(
+        "--no-colour-constancy",
+        action="store_true",
+        help="skip white-balance normalisation, to measure what it is worth. "
+        "Run both ways and compare the cross-camera number, which is the only "
+        "one it should move much.",
+    )
     args = parser.parse_args()
 
-    loaded = load(Path(args.data).resolve())
+    loaded = load(Path(args.data).resolve(), normalise=not args.no_colour_constancy)
     if loaded is None:
         return 1
-    X, y, people, conditions = loaded
+    X, y, people, conditions, devices = loaded
 
     if len(np.unique(y)) < 2:
         print("\nonly one class captured -- both real and attack samples are needed")
@@ -172,12 +221,31 @@ def main() -> int:
 
     by_person = protocol("LEAVE ONE PERSON OUT", X, y, people)
     by_condition = protocol("LEAVE ONE CONDITION OUT", X, y, conditions)
+    # The one that decides whether this works anywhere but the desk it was
+    # captured on. Every sensor has its own colour science and its own
+    # sharpening, so a detector can be excellent on unseen faces and useless
+    # on an unseen camera -- and nothing else here would reveal that.
+    by_device = protocol("LEAVE ONE CAMERA OUT", X, y, devices)
 
     print("\n" + "=" * 64)
     if not by_person:
         return 1
 
-    if by_condition and by_condition["eer"] > by_person["eer"] + 0.10:
+    if by_device is None:
+        print("NO CROSS-CAMERA NUMBER. Everything was captured on one camera, so")
+        print("nothing here says whether this works on another. Capture on a")
+        print("second and third camera before claiming it does -- that is where")
+        print("these break, and one camera cannot show it.")
+        print()
+
+    if by_device and by_device["eer"] > by_person["eer"] + 0.10:
+        print("DOES NOT TRAVEL. It judges unseen faces far better than unseen")
+        print(f"cameras -- {by_person['eer']:.1%} by person against")
+        print(f"{by_device['eer']:.1%} by camera. The model has partly learned")
+        print("this sensor rather than the attack. More cameras is the fix, and")
+        print("it is the only cheap one; try --no-colour-constancy both ways to")
+        print("see how much the white-balance normalisation is already buying.")
+    elif by_condition and by_condition["eer"] > by_person["eer"] + 0.10:
         print("MEMORISED THE ROOM. It judges unseen faces far better than unseen")
         print(f"lighting -- {by_person['eer']:.1%} by person against")
         print(f"{by_condition['eer']:.1%} by condition. That gap is the model")
