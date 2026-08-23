@@ -41,3 +41,8 @@ backend/public/
 # hundreds of megabytes, and re-downloadable — see benchmark-data/README.md.
 benchmark-data/*
 !benchmark-data/README.md
+
+# Pretrained anti-spoofing models and captured spoof samples. Downloaded by
+# ml-service/tools/silent_pad.py; the samples are raw biometric images.
+benchmark-data/pad-models/
+benchmark-data/pad/
