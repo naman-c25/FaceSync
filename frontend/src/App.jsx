@@ -207,7 +207,7 @@ export default function App() {
       <header className="masthead">
         <div className="wordmark">
           <span className="dot" />
-          FacePay
+          FaceSync
         </div>
         {consented && screen !== 'home' && (
           <button className="link-button" onClick={home}>

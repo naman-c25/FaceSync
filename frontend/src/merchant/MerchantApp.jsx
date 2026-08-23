@@ -54,7 +54,7 @@ export function MerchantApp() {
       <header className="masthead">
         <div className="wordmark">
           <span className="dot" />
-          FacePay <span className="muted">· till</span>
+          FaceSync <span className="muted">· till</span>
         </div>
         {merchant && (
           <button
