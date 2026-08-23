@@ -116,6 +116,12 @@ class LivenessSignals:
     #
     # `baseline_retries` counts windows thrown away for not being still, which
     # is what tells you a person never settles rather than never moves.
+    # Passive-mode evidence. `passive_motion_px` is the largest frame-to-
+    # frame movement of the face centre, which separates a live capture
+    # from one image repeated -- not from a photograph someone is holding.
+    passive_frames: int = 0
+    passive_motion_px: float = 0.0
+
     baseline_retries: int = 0
     baselines_locked: list = field(default_factory=list)
     step_shifts: list = field(default_factory=list)
@@ -131,6 +137,11 @@ def generate_challenge(steps: int | None = None) -> list[ChallengeStep]:
     ambiguous to perform and impossible to score, since the second one has no
     distinguishable start.
     """
+    # Passive mode asks for nothing, so there is nothing to randomise. The
+    # session still exists and still watches -- see `_advance_passive`.
+    if steps is None and settings.liveness_mode == "passive":
+        return []
+
     steps = settings.challenge_steps if steps is None else steps
 
     sequence: list[ChallengeStep] = []
@@ -189,6 +200,7 @@ class LivenessSession:
         self._ear_open: float | None = None
         self._ear_baseline_samples: list[float] = []
         self._nose_track: list[np.ndarray] = []
+        self._passive_last_centre: np.ndarray | None = None
 
     # -- public API ----------------------------------------------------
 
@@ -198,10 +210,18 @@ class LivenessSession:
             return None
         return self.challenge[self.step_index]
 
+    PASSIVE_PROMPT = "Hold still"
+
     @property
     def prompt(self) -> str | None:
         step = self.current_step
-        return step.prompt if step else None
+        if step:
+            return step.prompt
+        # Passive sessions have no steps, but the kiosk still needs a line to
+        # show while it watches.
+        if not self.challenge:
+            return self.PASSIVE_PROMPT
+        return None
 
     def outcome(self) -> FrameOutcome:
         """Current progress, without consuming a frame."""
@@ -244,6 +264,9 @@ class LivenessSession:
         self._consecutive_missing = 0
         self._record_signals(geometry)
 
+        if not self.challenge:
+            return self._advance_passive(geometry, now)
+
         step = self.current_step
         if step is None:
             return self._finish(LivenessStatus.PASSED)
@@ -256,6 +279,50 @@ class LivenessSession:
 
         if completed:
             self._begin_next_step()
+
+        return self._outcome()
+
+    def _advance_passive(self, geometry: FaceGeometry, now: float) -> FrameOutcome:
+        """Watch a still face for a moment, with nothing asked of the person.
+
+        What this checks, stated plainly so that nothing downstream describes
+        it as more than it is:
+
+        - a face is present, and only one of them is close enough in size to be
+          the subject, which `analyse` and the dominance rule already settled
+        - it stays present for `passive_scan_seconds`, so the decision rests on
+          a sample of someone standing there rather than one instant
+        - the frames are not identical to each other
+
+        That last one catches a static image fed straight into the pipeline,
+        where every frame is the same bytes. It does not catch a photograph
+        held up to a camera: that shakes in the hand, the sensor noise differs
+        frame to frame, and it will pass this comfortably.
+
+        So this is not presentation attack detection. A photograph reaches the
+        embedding stage and matches, and the PIN is then the only thing between
+        an attacker holding your picture and a payment. The challenge mode is
+        what makes the face a factor in its own right; this trades that for
+        speed. Whoever turns it on should know which of the two they have.
+        """
+        # Landmark positions never repeat exactly on a real camera -- sensor
+        # noise alone moves them. Identical frames mean one image, copied.
+        centre = geometry.landmarks.mean(axis=0)
+        if self._passive_last_centre is not None:
+            drift = float(np.linalg.norm(centre - self._passive_last_centre))
+            self.signals.passive_motion_px = round(
+                max(self.signals.passive_motion_px, drift), 3
+            )
+        self._passive_last_centre = centre
+
+        self.signals.passive_frames += 1
+
+        long_enough = self.signals.elapsed_seconds >= settings.passive_scan_seconds
+        enough_frames = self.signals.passive_frames >= settings.passive_min_frames
+        moved_at_all = self.signals.passive_motion_px > 0.0
+
+        if long_enough and enough_frames and moved_at_all:
+            return self._finish(LivenessStatus.PASSED)
 
         return self._outcome()
 
@@ -558,6 +625,15 @@ class LivenessSession:
 
     def _step_progress(self) -> float:
         step = self.current_step
+
+        # Passive mode has no step, so progress is how far through the scan
+        # window it is. The kiosk draws this as a filling ring, which is the
+        # only feedback there is when nothing is being asked of the person.
+        if step is None and not self.challenge:
+            by_time = self.signals.elapsed_seconds / settings.passive_scan_seconds
+            by_frames = self.signals.passive_frames / settings.passive_min_frames
+            return min(min(by_time, by_frames), 1.0)
+
         if step is None:
             return 1.0
         if step.action is ActionType.BLINK:

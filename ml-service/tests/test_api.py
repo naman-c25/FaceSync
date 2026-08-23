@@ -213,8 +213,12 @@ def test_malformed_base64_is_rejected(client):
 def test_verification_starts_with_a_prompt(client):
     body = client.post("/verify/start").json()
 
-    assert body["prompt"], "the user must be told what to do"
-    assert body["total_steps"] == settings.challenge_steps
+    assert body["prompt"], "the kiosk always needs a line to show"
+
+    # Passive mode has no steps to count, and the prompt is the standing
+    # instruction rather than one of a sequence.
+    expected = 0 if settings.liveness_mode == "passive" else settings.challenge_steps
+    assert body["total_steps"] == expected
 
 
 def test_two_sessions_get_independent_challenges(client):

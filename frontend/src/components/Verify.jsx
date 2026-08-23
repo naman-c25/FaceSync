@@ -204,23 +204,35 @@ export function Verify({ merchantId, onDone, onCancel }) {
     );
   }
 
-  const total = liveness?.totalSteps ?? 2;
+  // Zero steps means the server is running passively: it is watching rather
+  // than asking, so there is no sequence to draw dots for.
+  const total = liveness?.totalSteps ?? 0;
   const step = liveness?.stepIndex ?? 0;
+  const passive = total === 0;
+  const scanning = passive && liveness?.faceDetected;
 
   return (
     <div className="screen">
       <CameraStage camera={camera} guide={liveness?.faceDetected ? 'ok' : 'warn'}>
         <span className={`pill${liveness?.faceDetected ? '' : ' warn'}`}>
           <i className="dot live" />
-          {liveness?.faceDetected ? 'Live' : 'Looking for you'}
+          {scanning ? 'Scanning' : liveness?.faceDetected ? 'Live' : 'Looking for you'}
         </span>
 
         <div>
-          <p className="prompt">{liveness?.prompt ?? 'Get ready'}</p>
+          <p className="prompt">
+            {passive
+              ? scanning
+                ? 'Scanning your face'
+                : 'Look at the camera'
+              : (liveness?.prompt ?? 'Get ready')}
+          </p>
           <p className="prompt-hint">
             {liveness?.faceDetected
-              ? 'Follow the prompt'
-              : 'Centre your face in the frame'}
+              ? passive
+                ? 'Hold still for a moment'
+                : 'Follow the prompt'
+              : 'Centre your face in the oval'}
           </p>
 
           <div className="track">
@@ -231,14 +243,19 @@ export function Verify({ merchantId, onDone, onCancel }) {
             />
           </div>
 
-          <div className="steps">
-            {Array.from({ length: total }, (_, i) => (
-              <span
-                key={i}
-                className={i < step ? 'done' : i === step ? 'active' : ''}
-              />
-            ))}
-          </div>
+          {/* Only a challenge has a sequence worth showing. Passive mode has
+              the filling bar above and nothing else, which is the whole point
+              of it. */}
+          {!passive && (
+            <div className="steps">
+              {Array.from({ length: total }, (_, i) => (
+                <span
+                  key={i}
+                  className={i < step ? 'done' : i === step ? 'active' : ''}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </CameraStage>
 

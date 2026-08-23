@@ -772,3 +772,26 @@ footer {
     display: none !important;
   }
 }
+
+/* The ring pulses only while a passive scan is actually running, so the one
+   piece of feedback there is when nothing is being asked reads as activity
+   rather than a static outline. */
+.face-guide-ok .face-guide-ring {
+  animation: guide-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes guide-pulse {
+  0%,
+  100% {
+    stroke-opacity: 1;
+  }
+  50% {
+    stroke-opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .face-guide-ok .face-guide-ring {
+    animation: none;
+  }
+}

@@ -274,8 +274,12 @@ export function Till({ merchant, onSignOut }) {
     );
   }
 
-  const total = liveness?.totalSteps ?? 2;
+  // Zero steps means the server is running passively: it is watching rather
+  // than asking, so there is no sequence to draw dots for.
+  const total = liveness?.totalSteps ?? 0;
   const step = liveness?.stepIndex ?? 0;
+  const passive = total === 0;
+  const scanning = passive && liveness?.faceDetected;
 
   return (
     <div className="screen">
@@ -285,20 +289,32 @@ export function Till({ merchant, onSignOut }) {
         </span>
 
         <div>
-          <p className="prompt">{liveness?.prompt ?? 'Get ready'}</p>
+          <p className="prompt">
+            {passive
+              ? scanning
+                ? 'Scanning your face'
+                : 'Look at the camera'
+              : (liveness?.prompt ?? 'Get ready')}
+          </p>
           <p className="prompt-hint">
             {liveness?.faceDetected
-              ? 'Follow the prompt'
+              ? passive
+                ? 'Hold still for a moment'
+                : 'Follow the prompt'
               : 'One person in frame, facing the camera'}
           </p>
           <div className="track">
             <i style={{ width: `${Math.round((liveness?.stepProgress ?? 0) * 100)}%` }} />
           </div>
-          <div className="steps">
-            {Array.from({ length: total }, (_, i) => (
-              <span key={i} className={i < step ? 'done' : i === step ? 'active' : ''} />
-            ))}
-          </div>
+          {/* Only a challenge has a sequence worth showing. Passive mode has
+              the filling bar above and nothing else, which is the point. */}
+          {!passive && (
+            <div className="steps">
+              {Array.from({ length: total }, (_, i) => (
+                <span key={i} className={i < step ? 'done' : i === step ? 'active' : ''} />
+              ))}
+            </div>
+          )}
         </div>
       </CameraStage>
 

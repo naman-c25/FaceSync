@@ -135,6 +135,8 @@ class LivenessSignalsModel(BaseModel):
     frames_without_face: int
     frames_ear_unusable: int
     frames_crowded: int = 0
+    passive_frames: int = 0
+    passive_motion_px: float = 0.0
     blinks_detected: int
     ear_min: float | None = None
     ear_max: float | None = None

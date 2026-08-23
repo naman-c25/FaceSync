@@ -205,6 +205,55 @@ Every attempt is logged with both scores, the thresholds in force, and the full
 liveness signals, so these curves are drawn from real attempts rather than
 estimated.
 
+## Liveness: what is running, and what that buys
+
+The service has two liveness modes, and which one is on changes what the face
+factor is worth. `FACEPAY_LIVENESS_MODE` switches between them.
+
+**`challenge`** — a randomised prompt: blink twice, or look left, or look
+right, chosen per session with `secrets`. A printed photograph cannot perform
+an action it has not been shown, so this is genuine presentation attack
+detection against print, and against replay to the extent that a recording
+cannot answer a prompt it has never seen.
+
+Measured across 86 real attempts, it cost a median 8.0 seconds with two steps
+and failed one attempt in five. One step roughly halves that.
+
+**`passive`** — the mode the demo runs. No prompt and nothing asked: the
+service watches a face for about a second and a half and accepts it. What it
+actually checks is a face present throughout, one face clearly dominant in
+frame, a minimum number of frames over a minimum duration, and frames that are
+not byte-identical to each other.
+
+That last check catches a static image fed straight into the pipeline. **It
+does not catch a photograph held up to the camera**, and this should not be
+described as though it does. Measured on this pipeline, a still photograph
+passes every per-frame gate there is — sharpness 51.9 against a floor of 45,
+detection score 0.865 against 0.60, landmarks found, a usable 512-dimension
+embedding produced. Nothing outside the challenge objects to a photograph.
+
+So in passive mode the honest statement is: **the face identifies, and the PIN
+authorises.** An attacker holding your photograph gets as far as being
+recognised as you and is then stopped by a four-digit secret they do not have.
+That is one factor doing the work of two, and it is a deliberate trade of
+security for speed at the till rather than a claim about spoof resistance.
+
+Turning the challenge back on is one environment variable, and its tests and
+measurements are all still in the tree.
+
+### What would close the gap
+
+Passive presentation attack detection — texture and moiré analysis for screens,
+and the fact that a real face is a three-dimensional object while a photograph
+is a plane, so the landmark configuration of a real face deforms non-rigidly as
+the head moves while a photograph's deforms as a homography.
+
+The honest difficulty is not building it, it is validating it. A detector
+trained on one room, one camera and one printer learns those conditions rather
+than the attack, which is why published cross-dataset error rates are an order
+of magnitude worse than within-dataset ones. A weak passive detector is worse
+than none, because it replaces a known limit with an unknown one.
+
 ## Bugs worth knowing about, because they shaped the design
 
 Each of these looked like a working system until something specific caught it.

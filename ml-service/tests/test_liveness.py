@@ -656,8 +656,36 @@ def test_blink_progress_does_not_carry_across_steps():
 # -- challenge generation ----------------------------------------------
 
 
-def test_challenge_has_the_configured_length():
+def test_challenge_has_the_configured_length(monkeypatch):
+    monkeypatch.setattr(settings, "liveness_mode", "challenge")
     assert len(generate_challenge()) == settings.challenge_steps
+
+
+def test_passive_mode_asks_for_nothing(monkeypatch):
+    """No steps to walk, because nothing is being demanded of the person.
+
+    The session still exists and still watches -- see `_advance_passive` for
+    exactly how little that proves.
+    """
+    monkeypatch.setattr(settings, "liveness_mode", "passive")
+    assert generate_challenge() == []
+
+
+def test_an_explicit_challenge_is_run_whatever_the_mode(monkeypatch):
+    """The mode decides what gets generated, not what a session does.
+
+    A session handed steps walks them. Anything else would mean turning on
+    passive mode silently disarmed every challenge in the codebase, tests
+    included, which is how a security control disappears without anyone
+    noticing.
+    """
+    monkeypatch.setattr(settings, "liveness_mode", "passive")
+    session = LivenessSession("explicit", [ChallengeStep(ActionType.LOOK_LEFT)])
+
+    feed(session, at_rest(settings.baseline_frames + 2))
+    feed(session, [geometry(yaw=HEAD_SQUARE - 0.2)] * 20)
+
+    assert session.status is LivenessStatus.IN_PROGRESS, "the wrong way passed"
     assert len(generate_challenge(steps=4)) == 4
 
 
@@ -856,3 +884,88 @@ def test_a_passed_look_step_records_which_signal_carried_it():
     assert recorded["asked"] == "look_left"
     assert recorded["carried_by"] == "yaw"
     assert recorded["yaw_shift"] > 0
+
+
+# -- passive mode ------------------------------------------------------
+
+
+def passive_session(name="p"):
+    """A session with no steps, which is what passive mode produces."""
+    return LivenessSession(name, [])
+
+
+# Enough frames to clear both passive gates at the test clock's rate. Derived
+# rather than hardcoded so these follow the config instead of drifting from it.
+PASSIVE_FRAMES = max(
+    settings.passive_min_frames,
+    ceil(settings.passive_scan_seconds * 1000.0 / FRAME_MS) + 1,
+)
+
+
+def moving_face(count: int, drift: float = 0.4) -> list[FaceGeometry]:
+    """Frames of a face that is not perfectly frozen, which no real one is."""
+    frames = []
+    for i in range(count):
+        g = geometry()
+        g.landmarks[:, 0] += i * drift
+        frames.append(g)
+    return frames
+
+
+def test_passive_accepts_a_face_that_is_simply_there():
+    session = passive_session()
+    feed(session, moving_face(PASSIVE_FRAMES))
+
+    assert session.status is LivenessStatus.PASSED
+
+
+def test_passive_will_not_decide_from_a_glimpse():
+    # One instant is not a sample of someone standing there. The window is
+    # short enough not to feel like a wait and long enough to be a window.
+    session = passive_session("brief")
+    feed(session, moving_face(3))
+
+    assert session.status is LivenessStatus.IN_PROGRESS
+
+
+def test_passive_refuses_one_image_repeated():
+    # The only presentation attack this mode actually stops: the same bytes fed
+    # over and over, with no sensor noise between them. A photograph held up to
+    # a camera shakes and will not look like this.
+    frozen = geometry()
+    session = passive_session("frozen")
+    feed(session, [frozen] * (PASSIVE_FRAMES + 10))
+
+    assert session.status is LivenessStatus.IN_PROGRESS
+    assert session.signals.passive_motion_px == 0.0
+
+
+def test_passive_records_what_it_saw():
+    session = passive_session("recorded")
+    feed(session, moving_face(PASSIVE_FRAMES))
+
+    assert session.signals.passive_frames >= settings.passive_min_frames
+    assert session.signals.passive_motion_px > 0
+
+
+def test_passive_still_needs_a_face_present_throughout():
+    # A gap long enough to be someone leaving still ends the session, exactly
+    # as it does under a challenge.
+    session = passive_session("gap")
+    feed(session, moving_face(4))
+    feed(session, [None] * (settings.max_consecutive_missing_face + 1))
+
+    assert session.status is LivenessStatus.FAILED
+
+
+def test_passive_reports_progress_so_the_kiosk_can_draw_something():
+    # With nothing asked of the person, the filling ring is the only feedback
+    # there is that anything is happening.
+    session = passive_session("progress")
+    feed(session, moving_face(4))
+    early = session.outcome().step_progress
+
+    feed(session, moving_face(PASSIVE_FRAMES))
+
+    assert 0.0 < early < 1.0
+    assert session.outcome().step_progress == 1.0

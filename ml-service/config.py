@@ -236,6 +236,36 @@ class Settings(BaseSettings):
     # user glances away. Only a sustained run means they actually left.
     max_consecutive_missing_face: int = 15
 
+    # Which liveness mode a verification runs.
+    #
+    #   "challenge"  the randomised blink/look prompt
+    #   "passive"    hold still, no prompt, no instruction
+    #
+    # Switched rather than deleted, so the challenge, its tests and its
+    # measurements all stay in the tree and one environment variable puts it
+    # back: FACEPAY_LIVENESS_MODE=challenge.
+    #
+    # Passive is the faster flow and it is the weaker one, and the difference
+    # is not subtle. Measured on this pipeline, a still photograph passes every
+    # per-frame gate there is -- sharpness 51.9 against a floor of 45,
+    # detection score 0.865 against 0.60, landmarks found, a usable 512-d
+    # embedding. Nothing outside the challenge objects to a photograph. So in
+    # passive mode the face stops being a factor an attacker has to defeat and
+    # the PIN is doing the work on its own.
+    #
+    # What passive mode does check is written down honestly in
+    # `_advance_passive`: enough frames, one dominant face, over a minimum
+    # duration, and frames that are not identical. That catches a static image
+    # fed straight into the pipeline. It does not catch a photograph held up to
+    # the camera, and it must not be described as though it does.
+    liveness_mode: str = "passive"
+
+    # How long a passive scan must watch a face before it will accept one.
+    # Short enough not to feel like a wait, long enough that the frames are a
+    # sample of someone standing there rather than one instant.
+    passive_scan_seconds: float = 1.6
+    passive_min_frames: int = 12
+
     # How many actions the randomised challenge asks for.
     #
     # Two was meant to keep this under about five seconds. Measured against 86
