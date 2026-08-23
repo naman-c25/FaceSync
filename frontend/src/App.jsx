@@ -120,15 +120,6 @@ export default function App() {
           </p>
         )}
 
-        {!enrolled.hasPin && (
-          <p className="note warn">
-            You did not set a PIN, so you are registered but cannot pay yet —
-            the face says who you are, the PIN is how you approve. Register
-            again to add one; it will update this record rather than create a
-            second.
-          </p>
-        )}
-
         {weak && (
           <p className="note warn">
             Your samples varied more than ideal (

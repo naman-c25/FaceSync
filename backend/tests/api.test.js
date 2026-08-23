@@ -42,6 +42,7 @@ async function enrol({ displayName = 'Test Subject', region, merchantId } = {}) 
 
   const done = await ctx.request('POST', '/api/enroll/finalize', {
     sessionId: start.body.sessionId,
+    pin: '4827',
   });
   return done.body.userId;
 }
@@ -109,6 +110,7 @@ describe('enrollment', () => {
     }
     const done = await ctx.request('POST', '/api/enroll/finalize', {
       sessionId: start.body.sessionId,
+      pin: '4827',
     });
 
     assert.equal(done.status, 201);
@@ -176,6 +178,7 @@ describe('enrollment', () => {
     }
     const done = await ctx.request('POST', '/api/enroll/finalize', {
       sessionId: second.body.sessionId,
+      pin: '4827',
     });
 
     assert.equal(done.body.userId, first, 'must reuse the existing record');
@@ -200,6 +203,7 @@ describe('enrollment', () => {
     }
     const done = await ctx.request('POST', '/api/enroll/finalize', {
       sessionId: again.body.sessionId,
+      pin: '4827',
     });
 
     assert.equal(done.body.displayName, 'Original Name');
@@ -227,6 +231,7 @@ describe('enrollment', () => {
     }
     await ctx.request('POST', '/api/enroll/finalize', {
       sessionId: again.body.sessionId,
+      pin: '4827',
     });
 
     const after = await User.findById(userId).select('+embedding').lean();
@@ -252,6 +257,7 @@ describe('enrollment', () => {
     }
     const done = await ctx.request('POST', '/api/enroll/finalize', {
       sessionId: again.body.sessionId,
+      pin: '4827',
     });
 
     assert.equal(done.body.updatedExisting, true);
@@ -288,6 +294,7 @@ describe('enrollment', () => {
     }
     await ctx.request('POST', '/api/enroll/finalize', {
       sessionId: again.body.sessionId,
+      pin: '4827',
     });
 
     assert.equal(await User.countDocuments(), 1);
@@ -558,5 +565,115 @@ describe('ML service failures', () => {
     });
 
     assert.equal(response.status, 502);
+  });
+});
+
+describe('a PIN is required to register', () => {
+  /** Enrollment up to the point of finalising, so each test can vary that call. */
+  async function readyToFinalize(displayName = 'Test Subject') {
+    const start = await ctx.request('POST', '/api/enroll/start', { displayName });
+    for (let i = 0; i < 5; i += 1) {
+      await ctx.request('POST', '/api/enroll/capture', {
+        sessionId: start.body.sessionId,
+        image: FAKE_FRAME,
+      });
+    }
+    return start.body.sessionId;
+  }
+
+  it('refuses to finish without one', async () => {
+    // It used to be optional, which left people registered and unable to pay --
+    // a state with nothing to recommend it in a payment system, and one the
+    // customer only finds out about at a till with a queue behind them.
+    const sessionId = await readyToFinalize();
+    const { status, body } = await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId,
+    });
+
+    assert.equal(status, 400);
+    assert.equal(await User.countDocuments(), 0, 'a half-finished user was stored');
+    assert.ok(body.error);
+  });
+
+  it('refuses one of the PINs an attacker tries first', async () => {
+    const sessionId = await readyToFinalize();
+    const { status, body } = await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId,
+      pin: '1234',
+    });
+
+    assert.equal(status, 400);
+    assert.equal(body.error.code, 'weak_pin');
+    // Checked before anything is written, so a rejected PIN does not leave a
+    // registration behind that the person cannot use and cannot see.
+    assert.equal(await User.countDocuments(), 0);
+  });
+
+  it('refuses anything that is not four digits', async () => {
+    for (const pin of ['123', '12345', '12a4']) {
+      const sessionId = await readyToFinalize();
+      const { status } = await ctx.request('POST', '/api/enroll/finalize', {
+        sessionId,
+        pin,
+      });
+      assert.equal(status, 400, `${pin} was accepted`);
+    }
+  });
+
+  it('stores it hashed, never readable', async () => {
+    const sessionId = await readyToFinalize();
+    const { status, body } = await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId,
+      pin: '4827',
+    });
+
+    assert.equal(status, 201);
+    assert.equal(body.hasPin, true);
+
+    const stored = await User.findById(body.userId).select('+pinHash').lean();
+    assert.ok(stored.pinHash);
+    assert.ok(!stored.pinHash.includes('4827'));
+    // And it must not travel back out in the response either.
+    assert.ok(!JSON.stringify(body).includes('4827'));
+  });
+
+  it('gives a returning face the PIN it never had', async () => {
+    // The way back for everyone who enrolled while it was optional: register
+    // again, and the existing record is updated rather than duplicated.
+    const first = await enrol({ displayName: 'Returning' });
+    await User.updateOne({ _id: first }, { $set: { pinHash: null } });
+
+    ctx.ml.state.duplicateScore = 0.91;
+    const sessionId = await readyToFinalize('Returning');
+    const { body } = await ctx.request('POST', '/api/enroll/finalize', {
+      sessionId,
+      pin: '5074',
+    });
+
+    assert.equal(body.updatedExisting, true);
+    assert.equal(body.userId, first, 'a second record was created');
+    assert.equal(body.hasPin, true);
+
+    const stored = await User.findById(first).select('+pinHash').lean();
+    assert.ok(stored.pinHash, 'the returning face still has no PIN');
+    assert.equal(await User.countDocuments(), 1);
+  });
+
+  it('clears a lockout when a returning face sets a new PIN', async () => {
+    // Otherwise the one route out of a lockout would leave the person still
+    // locked, which is the same dead end in a different costume.
+    const first = await enrol({ displayName: 'Locked Out' });
+    await User.updateOne(
+      { _id: first },
+      { $set: { pinFailures: 3, pinLockedUntil: new Date(Date.now() + 900000) } },
+    );
+
+    ctx.ml.state.duplicateScore = 0.91;
+    const sessionId = await readyToFinalize('Locked Out');
+    await ctx.request('POST', '/api/enroll/finalize', { sessionId, pin: '9163' });
+
+    const stored = await User.findById(first).lean();
+    assert.equal(stored.pinFailures, 0);
+    assert.equal(stored.pinLockedUntil, null);
   });
 });

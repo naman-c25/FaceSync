@@ -40,13 +40,17 @@ const finalizeSchema = z.object({
     .regex(/^\d{4}$/, 'recoveryDigits must be exactly 4 digits')
     .nullish(),
 
-  // The knowledge factor. Optional here so someone can lend their face to the
-  // dataset without setting one; a payment then tells them plainly that a PIN
-  // is needed rather than failing for no stated reason.
+  // The knowledge factor, and required. It was optional while enrollment was
+  // mostly a way to collect faces for the dataset, but that left people
+  // registered and unable to pay — a state with nothing to recommend it in a
+  // payment system, and one the customer only discovers at a till with someone
+  // waiting behind them.
+  //
+  // Enforced here rather than only in the kiosk, because the kiosk is not the
+  // only thing that can call this.
   pin: z
     .string()
-    .regex(/^\d{4}$/, 'A PIN must be exactly four digits')
-    .nullish(),
+    .regex(/^\d{4}$/, 'A PIN must be exactly four digits'),
 });
 
 async function loadSession(sessionId, kind) {
@@ -126,10 +130,8 @@ export async function finalizeEnrollment(req, res) {
 
   // Checked before anything is written, so a weak PIN does not leave a
   // half-finished registration behind.
-  if (body.pin) {
-    const weak = rejectWeakPin(body.pin);
-    if (weak) throw new ApiError(400, weak, 'weak_pin');
-  }
+  const weak = rejectWeakPin(body.pin);
+  if (weak) throw new ApiError(400, weak, 'weak_pin');
 
   const result = await mlService.finalizeEnrollment(session.mlSessionId);
   const embedding = Buffer.from(result.embedding_b64, 'base64');
@@ -162,9 +164,12 @@ export async function finalizeEnrollment(req, res) {
             enrollment,
             lastSeenAt: new Date(),
             ...(session.region ? { homeRegion: session.region } : {}),
-            // A returning face may set a PIN it did not have, or replace one.
-            // Omitting it leaves the existing PIN alone rather than clearing it.
-            ...(body.pin ? { pinHash: hashPin(body.pin), pinFailures: 0, pinLockedUntil: null } : {}),
+            // A returning face always sets a PIN now, replacing whatever was
+            // there. That is also the route back for the people who enrolled
+            // while it was optional: register again and you leave with one.
+            pinHash: hashPin(body.pin),
+            pinFailures: 0,
+            pinLockedUntil: null,
           },
         },
         { new: true },
@@ -176,7 +181,7 @@ export async function finalizeEnrollment(req, res) {
         homeRegion: session.region,
         knownMerchants: session.merchantId ? [session.merchantId] : [],
         recoveryDigits: body.recoveryDigits ?? null,
-        pinHash: body.pin ? hashPin(body.pin) : null,
+        pinHash: hashPin(body.pin),
       });
 
   session.completed = true;
@@ -192,7 +197,9 @@ export async function finalizeEnrollment(req, res) {
     // should not have to infer which happened from the status code.
     updatedExisting: Boolean(existing),
     // Whether this identity can complete a payment, which needs both factors.
-    hasPin: Boolean(user.pinHash ?? body.pin),
+    // Always true now that a PIN is required, and kept so a caller does not
+    // have to know that to answer the question.
+    hasPin: true,
     matchedScore: existing?.score ?? null,
     // True when the same face came back under a different name. Worth calling
     // out on screen: from the person's side it looks like a failed

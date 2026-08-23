@@ -150,7 +150,12 @@ def run_enroll(args) -> int:
         camera.release()
         cv2.destroyAllWindows()
 
-    done = post("/api/enroll/finalize", {"sessionId": session["sessionId"]})
+    # A PIN is required at enrollment: the face says who, the PIN says approve,
+    # and an identity without one is registered but unable to pay.
+    done = post(
+        "/api/enroll/finalize",
+        {"sessionId": session["sessionId"], "pin": args.pin},
+    )
     enrollment = done["enrollment"]
 
     print(f"\nEnrolled as {done['userId']}")
@@ -280,6 +285,11 @@ def main() -> int:
 
     enroll = sub.add_parser("enroll", help="register a face")
     enroll.add_argument("--name", required=True)
+    enroll.add_argument(
+        "--pin",
+        required=True,
+        help="four digits, and not one of the obvious ones the server rejects",
+    )
     enroll.add_argument("--region", default=None)
     enroll.add_argument("--merchant", default=None)
     enroll.set_defaults(handler=run_enroll)

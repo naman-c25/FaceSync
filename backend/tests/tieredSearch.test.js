@@ -32,6 +32,7 @@ async function enrol({ displayName, merchantId, region } = {}) {
   }
   const done = await ctx.request('POST', '/api/enroll/finalize', {
     sessionId: start.body.sessionId,
+    pin: '4827',
   });
   return done.body.userId;
 }

@@ -18,6 +18,7 @@ export function Enroll({ onDone, onCancel }) {
   const [phase, setPhase] = useState('name');
   const [name, setName] = useState('');
   const [pin, setPin] = useState('');
+  const [pinAgain, setPinAgain] = useState('');
   const [session, setSession] = useState(null);
   const [collected, setCollected] = useState(0);
   const [rejection, setRejection] = useState(null);
@@ -34,7 +35,7 @@ export function Enroll({ onDone, onCancel }) {
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
   const pinRef = useRef('');
-  pinRef.current = pin || null;
+  pinRef.current = pin;
 
   const start = async (event) => {
     event.preventDefault();
@@ -47,7 +48,13 @@ export function Enroll({ onDone, onCancel }) {
     }
   };
 
-  const pinValid = pin === '' || /^\d{4}$/.test(pin);
+  // Both fields, because the PIN is now the only thing standing between a
+  // recognised face and a payment, and the input is masked. A typo here is not
+  // a wasted registration — it is being locked out at a till three wrong
+  // attempts later, with no idea why.
+  const pinComplete = /^\d{4}$/.test(pin);
+  const pinsMatch = pin === pinAgain;
+  const pinValid = pinComplete && pinsMatch;
 
   const takeSample = useCallback(async () => {
     if (busy.current || !session) return;
@@ -120,7 +127,7 @@ export function Enroll({ onDone, onCancel }) {
             />
           </div>
           <div className="field">
-            <label htmlFor="pin">PIN (optional)</label>
+            <label htmlFor="pin">Choose a PIN</label>
             <input
               id="pin"
               type="password"
@@ -132,13 +139,35 @@ export function Enroll({ onDone, onCancel }) {
               onChange={(event) =>
                 setPin(event.target.value.replace(/\D/g, '').slice(0, 4))
               }
+              required
             />
           </div>
 
+          <div className="field">
+            <label htmlFor="pin-again">Enter it again</label>
+            <input
+              id="pin-again"
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              placeholder="4 digits"
+              value={pinAgain}
+              onChange={(event) =>
+                setPinAgain(event.target.value.replace(/\D/g, '').slice(0, 4))
+              }
+              required
+            />
+          </div>
+
+          {pinComplete && pinAgain.length === 4 && !pinsMatch && (
+            <p className="note bad">Those two do not match.</p>
+          )}
+
           <p className="note">
             Your face says who you are; the PIN is how you approve a payment.
-            You can skip it and still be registered — you just cannot pay until
-            you set one. Come back and register again to add it later.
+            Both are needed, so pick something you will remember — and not a
+            birth year or 1234.
           </p>
 
           <button className="btn btn-primary" disabled={!name.trim() || !pinValid}>
