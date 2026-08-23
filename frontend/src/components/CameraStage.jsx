@@ -7,17 +7,27 @@
  * costs recognition accuracy for no security gain. Nothing here decides
  * anything; the server still sees, and still refuses, a second face.
  *
- * What it does buy is framing, and the size of it is now load-bearing. People
- * fill the shape they are given, and the anti-spoof models need the face at
- * roughly 38-50% of frame height -- that is where every reference sample they
- * classify correctly sits, while a face filling the frame collapses their crop
- * to 1.2 and the verdict gets thrown away. So this oval is 38% of the frame
- * rather than the 63% it started at -- the low end of that band, which keeps
- * the spoof models fed and still leaves the face well above the server's
- * minimum face height and its sharpness floor.
+ * What it does buy is framing, and the size of it is load-bearing. People fill
+ * the shape they are given, and where that lands the face decides two things
+ * at once.
  *
- * It also, without having to say so, discourages standing somewhere with
- * another person in shot behind you.
+ * The anti-spoof models crop outward from the face by a fixed factor, so the
+ * bigger the face the less they get: at 46% of frame height they achieve about
+ * 2.2, which is inside the 1.90-2.62 band every reference sample they classify
+ * correctly sits in. A face *filling* the frame collapses that to 1.2, which is
+ * where the one sample they get wrong sits and where the verdict is thrown
+ * away instead. 63%, which this started at, was over that line.
+ *
+ * Pulling further back is not free either. Measured on one real face at three
+ * framings, the score went 0.901 at 43% of frame height, 0.778 at 25% and
+ * 0.729 at 19.6% -- so more surrounding scene made a genuine face look *less*
+ * genuine, not more. One measurement is not a finding, but it is enough to
+ * stop treating "further back is safer" as obvious.
+ *
+ * Standing closer also puts less room in shot behind the customer, which makes
+ * a bystander proportionally smaller and the dominance rule easier -- and it
+ * discourages, without having to say so, standing somewhere with another
+ * person in view.
  */
 function FaceGuide({ tone }) {
   return (
@@ -30,7 +40,7 @@ function FaceGuide({ tone }) {
       <defs>
         <mask id="face-guide-cutout">
           <rect width="300" height="400" fill="white" />
-          <ellipse cx="150" cy="182" rx="57" ry="76" fill="black" />
+          <ellipse cx="150" cy="182" rx="69" ry="92" fill="black" />
         </mask>
       </defs>
       <rect
@@ -39,7 +49,7 @@ function FaceGuide({ tone }) {
         height="400"
         mask="url(#face-guide-cutout)"
       />
-      <ellipse className="face-guide-ring" cx="150" cy="182" rx="57" ry="76" />
+      <ellipse className="face-guide-ring" cx="150" cy="182" rx="69" ry="92" />
     </svg>
   );
 }
