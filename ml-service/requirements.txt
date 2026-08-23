@@ -20,3 +20,7 @@ onnxruntime
 
 # 468-point Face Mesh + iris landmarks — drives EAR and gaze liveness
 mediapipe
+
+# Presentation-attack detection: the SVM and the grouped cross-validation
+# in tools/train_pad.py. Not imported by the service itself.
+scikit-learn>=1.9
