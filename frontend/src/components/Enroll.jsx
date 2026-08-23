@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, explain } from '../api.js';
-import { createAnnouncer, speech, SPOKEN } from '../speech.js';
+import { speech, SPOKEN } from '../speech.js';
 import { useCamera } from '../useCamera.js';
 import { CameraStage } from './CameraStage.jsx';
 
@@ -25,7 +25,6 @@ export function Enroll({ onDone, onCancel }) {
   const [rejection, setRejection] = useState(null);
   const [countdown, setCountdown] = useState(3);
   const [error, setError] = useState(null);
-  const [announcer] = useState(createAnnouncer);
 
   const camera = useCamera(phase === 'capturing');
   const busy = useRef(false);

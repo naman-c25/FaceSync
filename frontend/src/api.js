@@ -25,7 +25,7 @@ async function post(path, body) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-  } catch (cause) {
+  } catch {
     throw new ApiError(
       'Cannot reach the server. Check your connection and try again.',
       { code: 'network' },

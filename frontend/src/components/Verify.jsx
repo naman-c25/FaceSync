@@ -178,6 +178,25 @@ export function Verify({ merchantId, onDone, onCancel }) {
     };
   }, [phase]);
 
+  // Said rather than only shown: the person is looking at a camera rather
+  // than at text, and someone who cannot read the prompt still needs to know
+  // what to do. In an effect because speaking during render happens again on
+  // every re-render, and twice under StrictMode.
+  useEffect(() => {
+    if (phase !== 'scanning') return;
+    announcer.announce(
+      liveness?.faceDetected
+        ? liveness.totalSteps === 0
+          ? SPOKEN.scanning
+          : liveness.prompt
+        : SPOKEN.noFace,
+    );
+  }, [phase, announcer, liveness?.faceDetected, liveness?.prompt, liveness?.totalSteps]);
+
+  useEffect(() => {
+    if (phase === 'rejected') speech.say(spokenFailure(liveness?.failureReason));
+  }, [phase, liveness?.failureReason]);
+
   const submitPin = async () => {
     setPhase('confirming');
     try {
@@ -218,25 +237,6 @@ export function Verify({ merchantId, onDone, onCancel }) {
       />
     );
   }
-
-  // Said rather than only shown: the person is looking at a camera rather
-  // than at text, and someone who cannot read the prompt still needs to know
-  // what to do. In an effect because speaking during render happens again on
-  // every re-render, and twice under StrictMode.
-  useEffect(() => {
-    if (phase !== 'scanning') return;
-    announcer.announce(
-      liveness?.faceDetected
-        ? liveness.totalSteps === 0
-          ? SPOKEN.scanning
-          : liveness.prompt
-        : SPOKEN.noFace,
-    );
-  }, [phase, announcer, liveness?.faceDetected, liveness?.prompt, liveness?.totalSteps]);
-
-  useEffect(() => {
-    if (phase === 'rejected') speech.say(spokenFailure(liveness?.failureReason));
-  }, [phase, liveness?.failureReason]);
 
   if (phase === 'error') {
     return (
