@@ -8,6 +8,7 @@ import { config } from './config/index.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { enrollmentRoutes } from './routes/enrollmentRoutes.js';
 import { merchantRoutes } from './routes/merchantRoutes.js';
+import { userRoutes } from './routes/userRoutes.js';
 import { verificationRoutes } from './routes/verificationRoutes.js';
 import { mlService } from './services/mlServiceClient.js';
 
@@ -32,8 +33,11 @@ function cors(req, res, next) {
     res.setHeader('Vary', 'Origin');
   }
 
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  // Authorization was missing, which worked only because the dev server
+  // proxies the API onto the same origin. Deployed on two hosts, every
+  // signed-in request would have failed its preflight.
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
 
   // A preflight carries no body and expects no content.
@@ -80,6 +84,7 @@ export function createApp() {
   app.use('/api/enroll', enrollmentRoutes);
   app.use('/api/verify', verificationRoutes);
   app.use('/api/merchant', merchantRoutes);
+  app.use('/api/user', userRoutes);
 
   serveFrontendIfBuilt(app);
 

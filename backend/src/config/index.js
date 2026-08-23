@@ -56,6 +56,10 @@ const schema = z.object({
   // How long a merchant stays signed in at a terminal. Long enough for a
   // day's trading, short enough that an unattended terminal expires.
   MERCHANT_SESSION_HOURS: z.coerce.number().positive().default(12),
+  // The customer portal is read-mostly and used from a personal phone, so a
+  // longer session costs less than making someone sign in every visit. Still
+  // finite: these tokens cannot be revoked before they expire.
+  USER_SESSION_HOURS: z.coerce.number().positive().default(72),
 
   // Comma-separated origins allowed to call this API from a browser, or "*"
   // to allow any. Deployed, the frontend is on a different origin, so without

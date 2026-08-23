@@ -39,6 +39,27 @@ const userSchema = new mongoose.Schema(
       completedAt: { type: Date, default: Date.now },
     },
 
+    // An optional portal account, and optional is the point.
+    //
+    // Enrolling a face still requires nothing: no email, no phone, no name
+    // that has to be real. That is what makes the till work without anyone
+    // presenting an identifier, and it is the promise the consent screen
+    // makes.
+    //
+    // Someone who wants to see their own history from home can attach an
+    // email and a password afterwards. They are opting in to being reachable,
+    // which is a different decision from paying with their face, and it is
+    // theirs to make separately. Both `select: false`, so a stray query
+    // cannot return them.
+    email: {
+      type: String,
+      default: null,
+      trim: true,
+      lowercase: true,
+      select: false,
+    },
+    passwordHash: { type: String, default: null, select: false },
+
     // The knowledge factor: hashed with a salt and a server-side pepper, never
     // encrypted. See services/pin.js for why hashing is the only sensible
     // choice for something nothing ever needs to read back.
@@ -103,11 +124,22 @@ const userSchema = new mongoose.Schema(
         delete ret.embedding;
         delete ret.recoveryDigits;
         delete ret.pinHash;
+        delete ret.passwordHash;
         delete ret.__v;
         return ret;
       },
     },
   },
+);
+
+// Unique across the accounts that have an email, and silent about the many that
+// do not. A `sparse` index is not enough here: sparse skips documents where the
+// field is *absent*, and `null` is a value rather than an absence, so every
+// account-less user collided with the first one. Filtering on the type is what
+// actually expresses "unique among the ones that have it".
+userSchema.index(
+  { email: 1 },
+  { unique: true, partialFilterExpression: { email: { $type: 'string' } } },
 );
 
 // Enrollments are re-taken periodically, so the natural query is "active users
