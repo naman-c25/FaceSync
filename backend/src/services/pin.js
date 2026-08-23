@@ -1,6 +1,7 @@
 import { createHmac, hkdfSync, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 import { config } from '../config/index.js';
+import { User } from '../models/User.js';
 
 const SCRYPT_N = 32768;
 const SCRYPT_KEYLEN = 64;
@@ -96,4 +97,84 @@ export function rejectWeakPin(pin) {
   if (ascending || descending) return 'Sequential digits are too easy to guess';
 
   return null;
+}
+
+// Failed attempts before an identity is locked. Four digits is only ten
+// thousand possibilities, so this — not the hash — is what actually protects
+// it, exactly as at a cash machine.
+const MAX_PIN_FAILURES = 3;
+const LOCKOUT_MINUTES = 15;
+
+/**
+ * Check the second factor for an identified customer.
+ *
+ * Returns a verdict rather than throwing, because "we know who you are, now
+ * enter your PIN" is a normal step in the flow and not an error — the till has
+ * to be able to prompt, and it cannot prompt until the face has said whose PIN
+ * to ask for.
+ *
+ * The lockout is the real protection. A four-digit PIN is ten thousand
+ * possibilities, which no hash makes expensive enough to matter; what stops
+ * guessing is running out of tries, exactly as at a cash machine.
+ */
+export async function checkPinAttempt(user, pin) {
+  // The hash is `select: false`, so it has to be asked for explicitly.
+  const record = await User.findById(user._id).select('+pinHash');
+
+  if (!record.pinHash) {
+    return {
+      ok: false,
+      outcome: 'no_pin_set',
+      reason:
+        'This customer has not set a PIN yet. They can add one by registering ' +
+        'again on their own device.',
+    };
+  }
+
+  if (record.pinLockedUntil && record.pinLockedUntil > new Date()) {
+    const minutes = Math.ceil((record.pinLockedUntil - Date.now()) / 60000);
+    return {
+      ok: false,
+      outcome: 'locked',
+      reason: `Too many wrong PINs. Locked for another ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+    };
+  }
+
+  if (!pin) {
+    return { ok: false, outcome: 'needs_pin', reason: 'PIN required' };
+  }
+
+  if (verifyPin(pin, record.pinHash)) {
+    // Only a success clears the counter. Leaving it to expire instead would
+    // let an attacker reset their budget by waiting out the lockout window.
+    if (record.pinFailures > 0) {
+      await User.updateOne(
+        { _id: record._id },
+        { $set: { pinFailures: 0, pinLockedUntil: null } },
+      );
+    }
+    return { ok: true };
+  }
+
+  const failures = record.pinFailures + 1;
+  const locked = failures >= MAX_PIN_FAILURES;
+
+  await User.updateOne(
+    { _id: record._id },
+    {
+      $set: {
+        pinFailures: locked ? 0 : failures,
+        pinLockedUntil: locked ? new Date(Date.now() + LOCKOUT_MINUTES * 60000) : null,
+      },
+    },
+  );
+
+  return {
+    ok: false,
+    outcome: locked ? 'locked' : 'wrong_pin',
+    attemptsLeft: locked ? 0 : MAX_PIN_FAILURES - failures,
+    reason: locked
+      ? `Too many wrong PINs. Locked for ${LOCKOUT_MINUTES} minutes.`
+      : `Wrong PIN. ${MAX_PIN_FAILURES - failures} attempt${MAX_PIN_FAILURES - failures === 1 ? '' : 's'} left.`,
+  };
 }

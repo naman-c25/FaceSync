@@ -147,8 +147,8 @@ export default function App() {
         <div className="stack">
           <h1>Ready when you are</h1>
           <p className="lede">
-            Register once, then walk up and pay. The system works out who you
-            are from your face alone — you never identify yourself first.
+            Register once, then walk up and pay. Your face says who you are;
+            a PIN says yes. You never identify yourself first.
           </p>
         </div>
 

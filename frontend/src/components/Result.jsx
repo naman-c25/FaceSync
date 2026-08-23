@@ -11,7 +11,16 @@ const OUTCOMES = {
     icon: '✓',
     tone: '',
     title: (result) => `Welcome, ${result.user.displayName}`,
-    body: 'Identified by face alone. In the full flow this is where the second factor comes in.',
+    body: 'Identified by face and approved by PIN. You presented nothing — no phone, no card, no name.',
+  },
+  // A face that was recognised and then refused at the PIN. Saying "not
+  // recognised" here would be wrong twice over: the face *was* recognised, and
+  // the person needs to know it was the PIN that stopped them, not the camera.
+  refused: {
+    icon: '!',
+    tone: 'unsure',
+    title: (result) => result.user?.displayName ?? 'Recognised',
+    body: 'Your face was recognised, but the PIN was not accepted.',
   },
   ambiguous: {
     icon: '?',
@@ -28,7 +37,11 @@ const OUTCOMES = {
 };
 
 export function Result({ result, onAgain, onEnrol }) {
-  const outcome = OUTCOMES[result.decision] ?? OUTCOMES.no_match;
+  // `confirmed` is only absent on outcomes that never reached the PIN at all.
+  const refused = result.decision === 'matched' && result.confirmed === false;
+  const outcome = refused
+    ? OUTCOMES.refused
+    : (OUTCOMES[result.decision] ?? OUTCOMES.no_match);
   const { top, runnerUp, margin } = result.confidence;
 
   return (
@@ -37,6 +50,9 @@ export function Result({ result, onAgain, onEnrol }) {
         <div className={`badge ${outcome.tone}`}>{outcome.icon}</div>
         <h2>{outcome.title(result)}</h2>
         <p className="muted">{outcome.body}</p>
+        {refused && result.reason && (
+          <p className="muted">{result.reason}</p>
+        )}
       </div>
 
       <dl className="scores">

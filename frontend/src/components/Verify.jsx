@@ -33,6 +33,9 @@ const MAX_BATCH = 12;
  */
 export function Verify({ merchantId, onDone, onCancel }) {
   const [phase, setPhase] = useState('starting');
+  const [identified, setIdentified] = useState(null);
+  const [pin, setPin] = useState('');
+  const [pinProblem, setPinProblem] = useState(null);
   const [liveness, setLiveness] = useState(null);
   const [error, setError] = useState(null);
 
@@ -139,7 +142,19 @@ export function Verify({ merchantId, onDone, onCancel }) {
     api
       .match(sessionRef.current.sessionId)
       .then((result) => {
-        if (!cancelled) onDoneRef.current(result);
+        if (cancelled) return;
+
+        // A match is one factor. The PIN is the other, and without it the
+        // kiosk would be single-factor while the till is two.
+        if (result.decision === 'matched') {
+          setIdentified(result);
+          setPin('');
+          setPinProblem(null);
+          setPhase('pin');
+          return;
+        }
+
+        onDoneRef.current(result);
       })
       .catch((cause) => {
         if (cancelled) return;
@@ -151,6 +166,46 @@ export function Verify({ merchantId, onDone, onCancel }) {
       cancelled = true;
     };
   }, [phase]);
+
+  const submitPin = async () => {
+    setPhase('confirming');
+    try {
+      const result = await api.confirmPin(sessionRef.current.sessionId, pin);
+
+      if (result.confirmed) {
+        onDoneRef.current({ ...identified, confirmed: true });
+        return;
+      }
+
+      // A wrong PIN with tries left keeps the scan, so one mistyped digit does
+      // not cost another round in front of the camera.
+      if (result.pinOutcome === 'wrong_pin') {
+        setPinProblem(result.reason);
+        setPin('');
+        setPhase('pin');
+        return;
+      }
+
+      onDoneRef.current({ ...identified, confirmed: false, ...result });
+    } catch (cause) {
+      setError(cause.message);
+      setPhase('error');
+    }
+  };
+
+  if (phase === 'pin' || phase === 'confirming') {
+    return (
+      <PinStep
+        name={identified?.user?.displayName}
+        pin={pin}
+        onPin={setPin}
+        problem={pinProblem}
+        busy={phase === 'confirming'}
+        onSubmit={submitPin}
+        onCancel={onCancel}
+      />
+    );
+  }
 
   if (phase === 'error') {
     return (
@@ -260,6 +315,83 @@ export function Verify({ merchantId, onDone, onCancel }) {
       </CameraStage>
 
       <button className="btn btn-ghost" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The second factor, at the customer kiosk.
+ *
+ * Shown only once the face has been identified, because until then there is
+ * nobody whose PIN to check. That order is also what makes the screen make
+ * sense to the person: they are approving, not identifying, and the name at
+ * the top is what tells them the system already knows which of those it is
+ * doing.
+ *
+ * The same shape as the till's keypad rather than a text field. A four-digit
+ * secret typed on a phone keyboard in public is a four-digit secret typed in
+ * public; large keys with no preview at least keep it off the screen.
+ */
+function PinStep({ name, pin, onPin, problem, busy, onSubmit, onCancel }) {
+  const press = (digit) => {
+    if (pin.length < 4) onPin(pin + digit);
+  };
+  const complete = pin.length === 4;
+
+  return (
+    <div className="screen">
+      <div className="card verdict">
+        <div className="badge">✓</div>
+        <h2>{name ?? 'Recognised'}</h2>
+        <p className="muted">
+          That is your face. Enter your PIN to approve.
+        </p>
+      </div>
+
+      {problem && <p className="note bad">{problem}</p>}
+
+      <div className="pin-dots">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} className={i < pin.length ? 'filled' : ''} />
+        ))}
+      </div>
+
+      <div className="keypad">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+          <button
+            key={d}
+            className="key"
+            disabled={busy}
+            onClick={() => press(String(d))}
+          >
+            {d}
+          </button>
+        ))}
+        <button className="key key-quiet" disabled={busy} onClick={() => onPin('')}>
+          Clear
+        </button>
+        <button className="key" disabled={busy} onClick={() => press('0')}>
+          0
+        </button>
+        <button
+          className="key key-quiet"
+          disabled={busy}
+          onClick={() => onPin(pin.slice(0, -1))}
+        >
+          ⌫
+        </button>
+      </div>
+
+      <button
+        className="btn btn-primary"
+        disabled={!complete || busy}
+        onClick={onSubmit}
+      >
+        {busy ? 'Checking…' : complete ? 'Approve' : 'Enter four digits'}
+      </button>
+      <button className="btn btn-ghost" disabled={busy} onClick={onCancel}>
         Cancel
       </button>
     </div>

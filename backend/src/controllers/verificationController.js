@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 import { ApiError } from '../middleware/errorHandler.js';
+import { User } from '../models/User.js';
+import { checkPinAttempt } from '../services/pin.js';
 import { Session } from '../models/Session.js';
 import { VerificationLog } from '../models/VerificationLog.js';
 import {
@@ -169,7 +171,26 @@ export async function matchFace(req, res) {
     throw new ApiError(status, message, error);
   }
 
-  const { result, matchedUser, narrowed, log } = await identifyFromSession(session);
+  // Held open rather than completed, because a match is only the first factor.
+  // The kiosk asks for a PIN next and `confirmPin` needs the session to still
+  // know who was identified -- the ML service discards its own the moment it
+  // answers, so there is no second match to make.
+  const { result, matchedUser, narrowed, log } = await identifyFromSession(session, {
+    completeOnMatch: false,
+  });
+
+  if (matchedUser) {
+    session.identifiedUser = matchedUser._id;
+    session.identifiedLog = log._id;
+    session.matchScore = result.top_score;
+    session.runnerUpScore = result.runner_up_score;
+    session.gallerySize = result.gallery_size;
+    await session.save();
+  }
+  // A miss deliberately leaves the session open. The attempt cap in
+  // `loadVerificationSession` governs how many tries one scan gets, and
+  // closing it here would take away the retry a customer who was simply badly
+  // lit is entitled to.
 
   res.json({
     decision: result.decision,
@@ -192,5 +213,79 @@ export async function matchFace(req, res) {
           ? 'disambiguate'
           : 'reject',
     logId: String(log._id),
+  });
+}
+
+const confirmSchema = z.object({
+  sessionId: z.string().min(1),
+  pin: z.string().regex(/^\d{4}$/, 'A PIN must be exactly four digits'),
+});
+
+/**
+ * The second factor, at the customer kiosk.
+ *
+ * The face said who; this is how they approve. Without it the kiosk would be
+ * single-factor while the till is two, and the same person would be held to
+ * different standards depending on which screen they happened to be in front
+ * of — which is worse than either rule on its own.
+ *
+ * The PIN policy itself lives in `services/pin.js` rather than here, so that
+ * this path and the payment path cannot drift apart on the one thing that
+ * actually protects four digits: the lockout.
+ */
+export async function confirmPin(req, res) {
+  const body = confirmSchema.parse(req.body);
+  const { session, error } = await loadVerificationSession(body.sessionId);
+
+  if (error) {
+    const [status, message] = {
+      session_not_found: [404, 'Session not found or expired'],
+      session_completed: [409, 'Session already completed'],
+      attempts_exhausted: [429, 'Too many attempts for this session'],
+    }[error];
+    throw new ApiError(status, message, error);
+  }
+
+  if (!session.identifiedUser) {
+    throw new ApiError(
+      409,
+      'This scan has not identified anyone yet',
+      'not_identified',
+    );
+  }
+
+  const user = await User.findById(session.identifiedUser);
+  const check = await checkPinAttempt(user, body.pin);
+
+  if (!check.ok) {
+    // A wrong PIN with tries left keeps the session, so the person can try
+    // again without standing through another scan. A lockout ends it.
+    if (check.outcome === 'locked' || check.outcome === 'no_pin_set') {
+      session.completed = true;
+      await session.save();
+    }
+
+    // 200 deliberately: a refused PIN is an outcome, not a failed request, and
+    // an error-shaped body would lose the reason the kiosk needs to show.
+    return res.json({
+      confirmed: false,
+      pinOutcome: check.outcome,
+      attemptsLeft: check.attemptsLeft,
+      reason: check.reason,
+      user: { userId: String(user._id), displayName: user.displayName },
+    });
+  }
+
+  session.completed = true;
+  await session.save();
+
+  res.json({
+    confirmed: true,
+    user: { userId: String(user._id), displayName: user.displayName },
+    confidence: {
+      top: session.matchScore,
+      runnerUp: session.runnerUpScore,
+    },
+    gallerySize: session.gallerySize,
   });
 }

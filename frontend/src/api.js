@@ -59,6 +59,9 @@ export const api = {
   submitFrames: (sessionId, frames) =>
     post('/api/verify/frame', { sessionId, frames }),
   match: (sessionId) => post('/api/verify/match', { sessionId }),
+  // The second factor. A match identifies; this approves — so the kiosk is
+  // two factors, the same as the till.
+  confirmPin: (sessionId, pin) => post('/api/verify/confirm', { sessionId, pin }),
 };
 
 export { ApiError };

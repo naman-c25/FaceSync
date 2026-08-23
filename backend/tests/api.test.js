@@ -395,15 +395,101 @@ describe('verification', () => {
     assert.equal(blocked.body.error.code, 'attempts_exhausted');
   });
 
-  it('closes the session once a user is identified', async () => {
+  it('holds the session open after a match, for the second factor', async () => {
+    // A match is one factor. Closing here would leave the kiosk single-factor
+    // while the till is two, and the same person held to different standards
+    // depending on which screen they happened to be in front of.
+    const userId = await enrol();
+    const sessionId = await verifyUntilReady();
+    ctx.ml.state.matchUserId = userId;
+
+    const matched = await ctx.request('POST', '/api/verify/match', { sessionId });
+
+    assert.equal(matched.body.nextStep, 'second_factor');
+    assert.equal(matched.body.user.userId, userId);
+
+    const confirmed = await ctx.request('POST', '/api/verify/confirm', {
+      sessionId,
+      pin: '4827',
+    });
+    assert.equal(confirmed.body.confirmed, true);
+  });
+
+  it('closes the session once the PIN is accepted', async () => {
     const userId = await enrol();
     const sessionId = await verifyUntilReady();
     ctx.ml.state.matchUserId = userId;
 
     await ctx.request('POST', '/api/verify/match', { sessionId });
-    const again = await ctx.request('POST', '/api/verify/match', { sessionId });
+    await ctx.request('POST', '/api/verify/confirm', { sessionId, pin: '4827' });
 
+    const again = await ctx.request('POST', '/api/verify/confirm', {
+      sessionId,
+      pin: '4827',
+    });
     assert.equal(again.status, 409);
+  });
+
+  it('refuses a wrong PIN but lets the scan stand', async () => {
+    // Otherwise one mistyped digit costs another scan, which is the kind of
+    // friction that makes people give up at a counter.
+    const userId = await enrol();
+    const sessionId = await verifyUntilReady();
+    ctx.ml.state.matchUserId = userId;
+
+    await ctx.request('POST', '/api/verify/match', { sessionId });
+    const wrong = await ctx.request('POST', '/api/verify/confirm', {
+      sessionId,
+      pin: '4828',
+    });
+
+    assert.equal(wrong.status, 200);
+    assert.equal(wrong.body.confirmed, false);
+    assert.equal(wrong.body.pinOutcome, 'wrong_pin');
+    assert.equal(wrong.body.attemptsLeft, 2);
+
+    const right = await ctx.request('POST', '/api/verify/confirm', {
+      sessionId,
+      pin: '4827',
+    });
+    assert.equal(right.body.confirmed, true);
+  });
+
+  it('will not confirm a scan that never identified anyone', async () => {
+    const sessionId = await verifyUntilReady();
+    ctx.ml.state.matchDecision = 'no_match';
+    await ctx.request('POST', '/api/verify/match', { sessionId });
+
+    const response = await ctx.request('POST', '/api/verify/confirm', {
+      sessionId,
+      pin: '4827',
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, 'not_identified');
+  });
+
+  it('locks an identity out of the kiosk on the same terms as the till', async () => {
+    // The lockout is what actually protects four digits, and it must not
+    // depend on which screen the guessing happens at.
+    const userId = await enrol();
+    ctx.ml.state.matchUserId = userId;
+
+    for (let i = 0; i < 3; i += 1) {
+      const sessionId = await verifyUntilReady();
+      await ctx.request('POST', '/api/verify/match', { sessionId });
+      await ctx.request('POST', '/api/verify/confirm', { sessionId, pin: '1111' });
+    }
+
+    const sessionId = await verifyUntilReady();
+    await ctx.request('POST', '/api/verify/match', { sessionId });
+    const locked = await ctx.request('POST', '/api/verify/confirm', {
+      sessionId,
+      pin: '4827',
+    });
+
+    assert.equal(locked.body.confirmed, false);
+    assert.equal(locked.body.pinOutcome, 'locked');
   });
 
   it('accepts explicit nulls for optional verification fields', async () => {

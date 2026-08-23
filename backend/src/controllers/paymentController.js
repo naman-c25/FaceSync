@@ -8,7 +8,7 @@ import {
   loadVerificationSession,
 } from '../services/identification.js';
 import { createOrder, RazorpayError } from '../services/razorpay.js';
-import { verifyPin } from '../services/pin.js';
+import { checkPinAttempt } from '../services/pin.js';
 import { User } from '../models/User.js';
 
 const chargeSchema = z.object({
@@ -21,12 +21,6 @@ const chargeSchema = z.object({
   // scan, then prompt, then charge.
   pin: z.string().regex(/^\d{4}$/).nullish(),
 });
-
-// Failed PIN attempts before an identity is locked. Four digits is only ten
-// thousand possibilities, so this — not the hash — is what actually protects
-// it, exactly as at a cash machine.
-const MAX_PIN_FAILURES = 3;
-const LOCKOUT_MINUTES = 15;
 
 const ERRORS = {
   session_not_found: [404, 'Scan session not found or expired'],
@@ -153,7 +147,7 @@ export async function charge(req, res) {
   // Second factor. The face said who; the PIN is how they approve — which is
   // the answer to the obvious question about a customer with no device at the
   // till. Without it this is single-factor, and RBI requires two.
-  const pinCheck = await checkPin(matchedUser, body.pin);
+  const pinCheck = await checkPinAttempt(matchedUser, body.pin);
   if (!pinCheck.ok) {
     // A lockout or a missing PIN ends the session; a wrong PIN with tries left
     // does not, so the customer can try again without rescanning their face.
@@ -248,78 +242,4 @@ export async function charge(req, res) {
       ? 'Order raised at Razorpay. Settlement needs a UPI Autopay mandate, which test mode cannot register.'
       : 'Razorpay is not configured; the authorisation was recorded without an order.',
   });
-}
-
-/**
- * Check the second factor for an identified customer.
- *
- * Returns a verdict rather than throwing, because "we know who you are, now
- * enter your PIN" is a normal step in the flow and not an error — the till has
- * to be able to prompt, and it cannot prompt until the face has said whose PIN
- * to ask for.
- *
- * The lockout is the real protection. A four-digit PIN is ten thousand
- * possibilities, which no hash makes expensive enough to matter; what stops
- * guessing is running out of tries, exactly as at a cash machine.
- */
-async function checkPin(user, pin) {
-  // The hash is `select: false`, so it has to be asked for explicitly.
-  const record = await User.findById(user._id).select('+pinHash');
-
-  if (!record.pinHash) {
-    return {
-      ok: false,
-      outcome: 'no_pin_set',
-      reason:
-        'This customer has not set a PIN yet. They can add one by registering ' +
-        'again on their own device.',
-    };
-  }
-
-  if (record.pinLockedUntil && record.pinLockedUntil > new Date()) {
-    const minutes = Math.ceil((record.pinLockedUntil - Date.now()) / 60000);
-    return {
-      ok: false,
-      outcome: 'locked',
-      reason: `Too many wrong PINs. Locked for another ${minutes} minute${minutes === 1 ? '' : 's'}.`,
-    };
-  }
-
-  if (!pin) {
-    return { ok: false, outcome: 'needs_pin', reason: 'PIN required' };
-  }
-
-  if (verifyPin(pin, record.pinHash)) {
-    // Only a success clears the counter. Leaving it to expire instead would
-    // let an attacker reset their budget by waiting out the lockout window.
-    if (record.pinFailures > 0) {
-      await User.updateOne(
-        { _id: record._id },
-        { $set: { pinFailures: 0, pinLockedUntil: null } },
-      );
-    }
-    return { ok: true };
-  }
-
-  const failures = record.pinFailures + 1;
-  const locked = failures >= MAX_PIN_FAILURES;
-
-  await User.updateOne(
-    { _id: record._id },
-    {
-      $set: {
-        pinFailures: locked ? 0 : failures,
-        pinLockedUntil: locked ? new Date(Date.now() + LOCKOUT_MINUTES * 60000) : null,
-      },
-    },
-  );
-
-  return {
-    ok: false,
-    outcome: locked ? 'locked' : 'wrong_pin',
-    attemptsLeft: locked ? 0 : MAX_PIN_FAILURES - failures,
-    reason: locked
-      ? `Too many wrong PINs. Locked for ${LOCKOUT_MINUTES} minutes.`
-      : `Wrong PIN. ${MAX_PIN_FAILURES - failures} attempt${MAX_PIN_FAILURES - failures === 1 ? '' : 's'} left.`,
-  };
 }
