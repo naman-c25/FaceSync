@@ -969,3 +969,55 @@ def test_passive_reports_progress_so_the_kiosk_can_draw_something():
 
     assert 0.0 < early < 1.0
     assert session.outcome().step_progress == 1.0
+
+
+def crowded_frame() -> FaceGeometry:
+    """A frame holding two faces of comparable size."""
+    g = geometry()
+    return FaceGeometry(
+        landmarks=g.landmarks, ear=g.ear, ear_left=g.ear_left, ear_right=g.ear_right,
+        gaze_horizontal=g.gaze_horizontal, gaze_vertical=g.gaze_vertical,
+        head_yaw=g.head_yaw, frontality=g.frontality,
+        faces_seen=2, dominance=1.2,
+    )
+
+
+def test_a_scan_mostly_unable_to_tell_who_is_who_is_refused():
+    """Found by holding somebody else's photograph up to the camera.
+
+    The holder's own face was larger, so it won the dominance rule in every
+    frame it appeared in, and the till confidently named the holder. Correct by
+    the rule, and useless to anyone watching -- so a scan that spent much of
+    itself with two comparable faces in shot is refused outright rather than
+    resolved to whoever happened to be biggest.
+    """
+    session = passive_session("crowded")
+    frames = moving_face(PASSIVE_FRAMES)
+    # Well over the allowed share of the scan.
+    for i in range(0, len(frames), 2):
+        frames[i] = crowded_frame()
+    # The service discards crowded frames before they reach the state machine,
+    # so the count is what the session sees rather than the frames themselves.
+    feed(session, moving_face(PASSIVE_FRAMES))
+    session.signals.frames_crowded = int(session.signals.frames_processed * 0.5)
+
+    assert session._too_crowded() is True
+
+
+def test_a_few_crowded_frames_do_not_lose_the_scan():
+    # Somebody walking past should not cost a customer their payment.
+    session = passive_session("passerby")
+    feed(session, moving_face(PASSIVE_FRAMES))
+    session.signals.frames_crowded = 1
+
+    assert session._too_crowded() is False
+    assert session.status is LivenessStatus.PASSED
+
+
+def test_a_short_scan_is_not_judged_on_crowding():
+    # Two crowded frames out of three is not evidence of anything.
+    session = passive_session("brief-crowd")
+    feed(session, moving_face(3))
+    session.signals.frames_crowded = 2
+
+    assert session._too_crowded() is False

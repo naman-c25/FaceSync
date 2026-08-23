@@ -269,6 +269,8 @@ class LivenessSession:
 
         step = self.current_step
         if step is None:
+            if self._too_crowded():
+                return self._finish(LivenessStatus.FAILED, "too_many_faces")
             return self._finish(LivenessStatus.PASSED)
 
         completed = (
@@ -322,11 +324,25 @@ class LivenessSession:
         moved_at_all = self.signals.passive_motion_px > 0.0
 
         if long_enough and enough_frames and moved_at_all:
+            if self._too_crowded():
+                return self._finish(LivenessStatus.FAILED, "too_many_faces")
             return self._finish(LivenessStatus.PASSED)
 
         return self._outcome()
 
     # -- budget and failure handling -----------------------------------
+
+    def _too_crowded(self) -> bool:
+        """Whether this scan spent too much of itself unable to tell who is who.
+
+        Checked at the end rather than per frame, because one or two crowded
+        frames mean somebody walked past and a scan that survives them is
+        better than one that does not.
+        """
+        seen = self.signals.frames_processed
+        if seen < 5:
+            return False
+        return self.signals.frames_crowded / seen > settings.max_crowded_frame_ratio
 
     def _budget_exhausted(self) -> bool:
         """A live person finishes in seconds; a long session means fiddling."""

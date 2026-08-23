@@ -57,6 +57,22 @@ class Settings(BaseSettings):
     # would be measuring one person while the payment charged another.
     face_candidates: int = 3
 
+    # Share of a scan's frames that may hold two comparable faces before the
+    # whole scan is refused.
+    #
+    # The dominance rule decides *within* a frame, and it is right to: someone
+    # at the till with a browser behind them should be served. But a scan where
+    # a third of the frames held two faces is a different situation -- someone
+    # is holding something up, or two people are leaning in -- and quietly
+    # resolving that to whoever happened to be largest is how a payment gets
+    # attributed to the wrong person with nothing on screen to say so.
+    #
+    # Found by holding a photograph of somebody else up to the camera: the
+    # holder's own face was larger, so it won every frame it appeared in, and
+    # the till confidently named the holder. Correct by the rule, and useless
+    # to anyone watching.
+    max_crowded_frame_ratio: float = 0.25
+
     # Laplacian variance below this means the frame is too blurry to embed.
     # Applies to enrollment samples and to the frame finally matched against.
     min_sharpness: float = 45.0
