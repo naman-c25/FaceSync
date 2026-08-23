@@ -10,7 +10,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --env-file=tests/test.env --test --test-concurrency=1 \"tests/*.test.js\"",
-    "keygen": "node src/scripts/generateKey.js"
+    "keygen": "node src/scripts/generateKey.js",
+    "users": "node src/scripts/listUsers.js"
   },
   "dependencies": {
     "express": "^5.1.0",
