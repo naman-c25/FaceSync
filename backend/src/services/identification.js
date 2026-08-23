@@ -157,6 +157,12 @@ export function livenessFields(signals, { passed = true, failureReason = null } 
     // who never settles from someone who never moves.
     baselineRetries: signals.baseline_retries ?? 0,
     stepShifts: signals.step_shifts ?? [],
+    // Separates "the camera never saw a face" from "it saw two and could not
+    // tell which was paying", which look identical in the outcome and need
+    // opposite advice.
+    framesCrowded: signals.frames_crowded ?? 0,
+    passiveFrames: signals.passive_frames ?? 0,
+    passiveMotionPx: signals.passive_motion_px ?? null,
   };
 }
 

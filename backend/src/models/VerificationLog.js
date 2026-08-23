@@ -101,6 +101,15 @@ const verificationLogSchema = new mongoose.Schema(
       // separating someone who never settles from someone who never moves.
       baselineRetries: { type: Number, default: 0 },
       stepShifts: { type: mongoose.Schema.Types.Mixed, default: [] },
+
+      // Passive-mode evidence, and the crowding count. Without these a
+      // passive session that failed is indistinguishable from one that never
+      // saw a face: `framesCrowded` says two faces were in shot and neither
+      // dominated, `passiveMotionPx` says whether the frames were a live
+      // capture or one image repeated.
+      framesCrowded: { type: Number, default: 0 },
+      passiveFrames: { type: Number, default: 0 },
+      passiveMotionPx: { type: Number, default: null },
     },
 
     // Encrypted, and only present on attempts that did not resolve to a user.
