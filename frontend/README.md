@@ -31,8 +31,17 @@ the browser will block the mixed-content request.
 For testing on a phone before deploying, the easiest route is a tunnel:
 
 ```bash
-npx localtunnel --port 5173      # or: ngrok http 5173
+ngrok http 5173 --domain=<your-static-domain>
 ```
+
+Expose 5173, not 3000 — the dev server proxies `/api` to the backend, so one
+tunnel serves the whole system.
+
+Vite refuses requests whose Host header it does not recognise, which is what
+stops a page on another site from reaching this dev server through a browser.
+Tunnel hostnames are listed in `vite.config.js`; a host it does not cover goes
+in `DEV_TUNNEL_HOST` rather than switching the check off, because this server
+proxies to an API that can charge a face.
 
 Both hand back an HTTPS URL.
 

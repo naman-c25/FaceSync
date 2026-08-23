@@ -12,6 +12,20 @@ export default defineConfig(({ mode }) => {
       // Reachable from a phone on the same wifi, which is the only way to test
       // the mobile path before deploying.
       host: true,
+      // Vite refuses requests whose Host header it does not recognise, which
+      // is what stops a page on another site from talking to this dev server
+      // through the browser. A tunnel arrives under its own hostname, so it
+      // has to be named.
+      //
+      // Named rather than switched off with `true`: this server proxies to the
+      // API, and the API can charge a face. Listing the tunnels actually in
+      // use keeps that guard doing its job.
+      allowedHosts: [
+        '.ngrok-free.dev',
+        '.ngrok.io',
+        '.trycloudflare.com',
+        ...(env.DEV_TUNNEL_HOST ? [env.DEV_TUNNEL_HOST] : []),
+      ],
       // In development the API is same-origin through this proxy, so CORS
       // never enters the picture locally.
       proxy: { '/api': proxy, '/health': proxy },
