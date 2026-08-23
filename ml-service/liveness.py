@@ -352,16 +352,20 @@ class LivenessSession:
         """Score a look step on movement away from the rest position.
 
         The first few frames of the step establish where this person's head and
-        eyes sit at rest. After that, either signal can satisfy the step:
+        eyes sit at rest. After that the step can be answered either way, since
+        told to "look left" some people swivel their eyes and others turn their
+        head, and demanding one of them would reject people who did exactly
+        what the prompt asked:
 
-        - the eyes swivel, or
+        - the head is still and the eyes swivel, or
         - the head turns.
 
-        Both are accepted because told to "look left" some people move their
-        eyes and others turn their head, and a head turn leaves the iris
-        centred between the eye corners — so the gaze ratio barely moves.
-        Demanding eye movement alone would reject people who did exactly what
-        the prompt asked.
+        Which of the two is read is decided by the head, not by taking the
+        better of them. The iris ratio measures where the eyes point *within the
+        head*, so it only describes intent while the head is holding still —
+        once the head turns it describes counter-rotation instead. Accepting
+        either signal independently was a live bug; see the comment on the
+        decision below.
 
         Measuring movement rather than absolute position is what keeps a still
         photo from satisfying this. Someone photographed with their head turned
@@ -390,15 +394,39 @@ class LivenessSession:
         gaze_shift = geometry.gaze_horizontal - gaze_rest
         yaw_shift = geometry.head_yaw - yaw_rest
 
+        # How far the head has moved, before the direction mapping is applied.
+        # The gate below asks "is the head turning at all", which is a question
+        # about magnitude and must not depend on which way the prompt asked.
+        head_movement = abs(yaw_shift)
+
         # LOOK_LEFT is the user's left, which is the image's right, so both
         # signals shift upward. GAZE_LEFT_IS_HIGH_RATIO records that mapping.
         looking_left = step.action is ActionType.LOOK_LEFT
         if looking_left != GAZE_LEFT_IS_HIGH_RATIO:
             gaze_shift, yaw_shift = -gaze_shift, -yaw_shift
 
-        satisfied = (
-            gaze_shift >= settings.gaze_delta or yaw_shift >= settings.yaw_delta
-        )
+        # One signal decides, chosen by whether the head is moving -- never
+        # both with an `or`.
+        #
+        # Reading them independently was a real hole, found at a live kiosk:
+        # prompted to look one way and turning the other, the challenge passed.
+        # The two signals are not independent. Someone turning their head while
+        # still watching the screen counter-rotates their eyes to stay on the
+        # camera, which slides the iris toward the opposite eye corner -- so one
+        # movement produces a yaw and a gaze shift with *opposite signs*, and
+        # `or` let whichever of them happened to point the requested way carry
+        # the step. A single turn answered both prompts.
+        #
+        # So the gaze ratio is only read as intent while the head is still. Once
+        # the head is turning, the iris position is describing the counter-
+        # rotation rather than where the person is looking, and only the yaw is
+        # a statement about direction. This is the same shape as
+        # `ear_is_meaningful`: a measurement stops meaning what it usually means
+        # once the head moves, so it is gated rather than trusted.
+        if head_movement >= settings.yaw_still_max:
+            satisfied = yaw_shift >= settings.yaw_delta
+        else:
+            satisfied = gaze_shift >= settings.gaze_delta
 
         if not satisfied:
             self._gaze_held_since = None

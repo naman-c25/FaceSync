@@ -128,10 +128,14 @@ def eye_move_frames(shift: float, count: int | None = None) -> list[FaceGeometry
 
 
 def head_turn_frames(shift: float, count: int | None = None) -> list[FaceGeometry]:
-    """Rest, then the head turns by `shift` with the eyes staying centred.
+    """Rest, then the head turns by `shift` with the eyes following it round.
 
-    This is what a head turn looks like to the mesh: the iris keeps its
-    position between the eye corners, so the gaze ratio does not move at all.
+    Someone who turns their head and lets their gaze go with it keeps the iris
+    where it was between the eye corners, so the gaze ratio does not move.
+
+    This is only one of the two ways a head turn looks. For the other -- eyes
+    staying on the screen while the head goes -- see
+    `head_turn_eyes_on_screen_frames`, which is the one that found a bug.
     """
     count = GAZE_FRAMES if count is None else count
     return at_rest() + [geometry(gaze=GAZE_CENTRE, yaw=HEAD_SQUARE + shift)] * count
@@ -495,9 +499,9 @@ def test_look_right_passes_when_the_eyes_move_the_other_way():
 def test_turning_the_head_satisfies_a_look_step():
     """Most people turn their head rather than swivel their eyes.
 
-    A head turn leaves the iris centred between the eye corners, so the gaze
-    ratio stays at rest. Requiring eye movement alone would reject someone who
-    did exactly what the prompt asked.
+    Requiring eye movement alone would reject someone who did exactly what the
+    prompt asked. Here the eyes travel with the head, so the gaze ratio stays
+    at rest and the yaw carries the step on its own.
     """
     session = LivenessSession("s5b", [ChallengeStep(ActionType.LOOK_LEFT)])
     feed(session, head_turn_frames(+settings.yaw_delta + 0.02))
@@ -683,3 +687,110 @@ def test_frames_after_a_verdict_do_not_change_it():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+def head_turn_eyes_on_screen_frames(
+    shift: float, count: int | None = None
+) -> list[FaceGeometry]:
+    """A head turn by someone who keeps watching the screen.
+
+    This is the head turn people actually perform, and it does not look like
+    `head_turn_frames` at all. The prompt is on the screen, so they read it,
+    turn their head, and keep their eyes on the camera -- which means the
+    eyeballs counter-rotate in their sockets to stay on target.
+
+    In the mesh that counter-rotation moves the iris *toward the opposite eye
+    corner*, so the gaze ratio swings the other way from the yaw. The two
+    signals end up with opposite signs from one physical movement.
+    """
+    count = GAZE_FRAMES if count is None else count
+    return at_rest() + [
+        geometry(gaze=GAZE_CENTRE - shift, yaw=HEAD_SQUARE + shift)
+    ] * count
+
+
+def test_a_real_head_turn_satisfies_the_direction_it_actually_went():
+    session = LivenessSession("turn-ok", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, head_turn_eyes_on_screen_frames(+settings.yaw_delta + 0.05))
+
+    assert session.status is LivenessStatus.PASSED
+
+
+def test_a_real_head_turn_does_not_satisfy_the_opposite_direction():
+    """The bug this exists for, reported from a live kiosk.
+
+    Prompted to look one way, the user turned the other way, and the challenge
+    passed anyway. Every existing gaze test moves one signal while pinning the
+    other at rest, so none of them could see it: a real head turn moves both,
+    in opposite directions, and the step was satisfied by gaze *or* yaw with no
+    check that the two agreed. Whichever one happened to point at the requested
+    direction carried the step, so a single turn answered both prompts.
+
+    That is not a cosmetic failure. Randomising the direction is what stops a
+    recorded clip from being replayed, and a check that accepts either
+    direction throws away most of that.
+    """
+    session = LivenessSession("turn-wrong", [ChallengeStep(ActionType.LOOK_RIGHT)])
+    feed(session, head_turn_eyes_on_screen_frames(+settings.yaw_delta + 0.05, count=25))
+
+    assert session.status is LivenessStatus.IN_PROGRESS
+
+
+def test_the_mirror_image_of_that_turn_is_judged_the_same_way():
+    """The same movement the other way round, so neither direction is special."""
+    session = LivenessSession("turn-ok-2", [ChallengeStep(ActionType.LOOK_RIGHT)])
+    feed(session, head_turn_eyes_on_screen_frames(-settings.yaw_delta - 0.05))
+    assert session.status is LivenessStatus.PASSED
+
+    session = LivenessSession("turn-wrong-2", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, head_turn_eyes_on_screen_frames(-settings.yaw_delta - 0.05, count=25))
+    assert session.status is LivenessStatus.IN_PROGRESS
+
+
+def test_small_head_drift_does_not_take_the_step_away_from_the_eyes():
+    """Nobody holds their head perfectly still while moving their eyes.
+
+    Under `yaw_still_max` the head counts as at rest and the eyes still decide,
+    so someone answering with their eyes is not made to turn their head as well.
+    """
+    session = LivenessSession("drift", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(
+        session,
+        at_rest()
+        + [
+            geometry(
+                gaze=GAZE_CENTRE + settings.gaze_delta + 0.02,
+                yaw=HEAD_SQUARE + settings.yaw_still_max * 0.9,
+            )
+        ]
+        * GAZE_FRAMES,
+    )
+
+    assert session.status is LivenessStatus.PASSED
+
+
+def test_once_the_head_is_moving_the_eyes_stop_deciding():
+    """The cost of the fix, written down rather than discovered later.
+
+    Between `yaw_still_max` and `yaw_delta` the head has moved enough to make
+    the iris ratio untrustworthy but not enough to count as a turn, so the step
+    is not satisfied and the person has to commit to the movement.
+
+    That is the right trade: the alternative is reading a gaze ratio that is
+    describing counter-rotation, which is exactly what let one turn answer
+    both prompts.
+    """
+    session = LivenessSession("band", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(
+        session,
+        at_rest()
+        + [
+            geometry(
+                gaze=GAZE_CENTRE + settings.gaze_delta + 0.02,
+                yaw=HEAD_SQUARE + (settings.yaw_still_max + settings.yaw_delta) / 2,
+            )
+        ]
+        * 25,
+    )
+
+    assert session.status is LivenessStatus.IN_PROGRESS

@@ -133,6 +133,27 @@ class Settings(BaseSettings):
     # How far the head must turn.
     yaw_delta: float = 0.06
 
+    # Below this much head movement the head counts as still, and the gaze
+    # ratio is read as a deliberate eye movement. Above it, only the yaw is
+    # trusted.
+    #
+    # This exists because the two signals are not independent, which a live
+    # kiosk found the hard way: prompted one way and turning the other, the
+    # challenge passed anyway. The prompt is on the screen, so people read it,
+    # turn their head, and keep their eyes on the camera — and eyeballs that
+    # stay on target while the head rotates counter-rotate in their sockets.
+    # In the mesh that drives the iris toward the opposite eye corner, so gaze
+    # and yaw come out of one movement with *opposite* signs, and a rule that
+    # accepted either one independently was satisfied by whichever happened to
+    # point at the requested direction.
+    #
+    # Set to half of yaw_delta from the logged ranges: real turns move yaw by
+    # 0.28-0.62 and gaze by comparable amounts, so counter-rotation scales
+    # roughly one-to-one with the turn. At half the yaw a turn needs to count,
+    # the induced gaze shift lands near 0.03 — below gaze_delta, so it cannot
+    # carry a step on its own.
+    yaw_still_max: float = 0.03
+
     # Frames averaged at the start of a step to establish that rest position.
     # Averaging rather than taking one frame keeps landmark jitter out of the
     # baseline, which would otherwise offset every comparison that follows.
