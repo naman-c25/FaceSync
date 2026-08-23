@@ -4,6 +4,7 @@ import { api, explain } from '../api.js';
 import { CameraStage } from '../components/CameraStage.jsx';
 import { useCamera } from '../useCamera.js';
 import { merchantApi } from './api.js';
+import { Receipt } from './Receipt.jsx';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const CAPTURE_INTERVAL_MS = 66;
@@ -246,8 +247,31 @@ export function Till({ merchant, onSignOut }) {
     );
   }
 
+  if (phase === 'receipt' && outcome) {
+    return (
+      <Receipt
+        merchant={merchant}
+        payment={{
+          amount: rupees,
+          customer: outcome.customer.name,
+          authFactors: outcome.authFactors,
+          transactionId: outcome.transactionId,
+          orderId: outcome.orderId,
+        }}
+        onDone={reset}
+      />
+    );
+  }
+
   if (phase === 'done' && outcome) {
-    return <Outcome outcome={outcome} amount={rupees} onDone={reset} />;
+    return (
+      <Outcome
+        outcome={outcome}
+        amount={rupees}
+        onReceipt={() => setPhase('receipt')}
+        onDone={reset}
+      />
+    );
   }
 
   const total = liveness?.totalSteps ?? 2;
@@ -285,7 +309,7 @@ export function Till({ merchant, onSignOut }) {
   );
 }
 
-function Outcome({ outcome, amount, onDone }) {
+function Outcome({ outcome, amount, onReceipt, onDone }) {
   if (!outcome.charged) {
     // A refused payment has three quite different causes, and saying "not
     // recognised" for all of them would be wrong twice over: a locked PIN
@@ -368,6 +392,13 @@ function Outcome({ outcome, amount, onDone }) {
           register the mandate a real debit would run against. */}
       <p className="note warn">{outcome.settlement}</p>
 
+      {/* The customer arrived with nothing and leaves with nothing, which is
+          the point of the system and also the one thing that feels unfinished
+          at a counter. Offered rather than forced: most people will not want
+          one, and printing by default wastes a roll. */}
+      <button className="btn btn-secondary" onClick={onReceipt}>
+        Receipt
+      </button>
       <button className="btn btn-primary" onClick={onDone}>
         Next customer
       </button>

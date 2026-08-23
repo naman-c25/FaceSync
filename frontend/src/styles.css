@@ -660,3 +660,115 @@ footer {
     transition: none;
   }
 }
+
+/* A ledger row that reprints its own receipt. A button rather than a div with
+   a handler, so it is reachable by keyboard and announced as actionable. */
+.ledger-row-action {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.ledger-row-action:hover,
+.ledger-row-action:focus-visible {
+  background: var(--surface-2);
+}
+
+/* -- receipt ----------------------------------------------------------- */
+
+.receipt {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.receipt-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.receipt-amount {
+  font-size: 2.4rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.receipt-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.receipt-lines > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.9rem;
+}
+
+.receipt-lines dt {
+  color: var(--muted);
+}
+
+.receipt-lines dd {
+  text-align: right;
+  word-break: break-all;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+}
+
+.receipt-foot {
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* A till may have a roll printer attached, and the browser's print dialog is
+   the whole feature -- so printing must produce the slip and nothing else.
+   Colours are forced light because receipt paper is white and the app is not. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #receipt,
+  #receipt * {
+    visibility: visible;
+  }
+
+  #receipt {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    border: none;
+    background: #fff;
+    color: #000;
+    padding: 0;
+  }
+
+  #receipt .muted,
+  #receipt dt {
+    color: #555;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

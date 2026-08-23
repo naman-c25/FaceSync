@@ -233,6 +233,11 @@ export async function charge(req, res) {
     amount: body.amount,
     currency: 'INR',
     status: transaction.status,
+    // What the customer actually proved, so a receipt can state it rather than
+    // assume it. Read off the stored transaction for the same reason it is
+    // stored there: as factors are added, a slip that guessed would start
+    // lying.
+    authFactors: transaction.authFactors,
     orderId: order?.id ?? null,
     confidence,
     gallerySize: session.gallerySize,

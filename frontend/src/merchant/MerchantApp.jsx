@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { merchantApi, tokenStore } from './api.js';
+import { Receipt } from './Receipt.jsx';
 import { Till } from './Till.jsx';
 
 /**
@@ -141,6 +142,9 @@ function SignIn({ onSignedIn }) {
 }
 
 function History({ merchant, onBack }) {
+  // A customer who comes back an hour later wanting proof should not need the
+  // shopkeeper to remember anything. Every row can produce its own slip.
+  const [receipt, setReceipt] = useState(null);
   const [data, setData] = useState(null);
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
@@ -175,6 +179,18 @@ function History({ merchant, onBack }) {
     );
   }
 
+  // The history row carries everything the slip needs, so reprinting one does
+  // not cost a round trip.
+  if (receipt) {
+    return (
+      <Receipt
+        merchant={merchant}
+        payment={receipt}
+        onDone={() => setReceipt(null)}
+      />
+    );
+  }
+
   return (
     <div className="screen">
       <div className="stack">
@@ -198,7 +214,12 @@ function History({ merchant, onBack }) {
       ) : (
         <div className="ledger">
           {data.transactions.map((t) => (
-            <div key={t.id} className="ledger-row">
+            <button
+              key={t.id}
+              type="button"
+              className="ledger-row ledger-row-action"
+              onClick={() => setReceipt(t)}
+            >
               <div>
                 <strong>{t.customer}</strong>
                 <span className="muted">
@@ -215,7 +236,7 @@ function History({ merchant, onBack }) {
                 ₹{t.amount}
                 <span className={`tag tag-${t.status}`}>{t.status}</span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}

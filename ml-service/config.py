@@ -236,9 +236,26 @@ class Settings(BaseSettings):
     # user glances away. Only a sustained run means they actually left.
     max_consecutive_missing_face: int = 15
 
-    # How many actions the randomised challenge asks for. Two keeps it under
-    # about five seconds while making the exact sequence hard to pre-record.
-    challenge_steps: int = 2
+    # How many actions the randomised challenge asks for.
+    #
+    # Two was meant to keep this under about five seconds. Measured against 86
+    # real attempts it did not: the median successful challenge took 8.0s, the
+    # 90th percentile 18.4s, and one attempt in five failed outright. That is
+    # not a checkout — that is a queue.
+    #
+    # One step roughly halves it, and what it costs is worth being precise
+    # about. A printed photo still fails every action, so the attack this
+    # mostly exists to stop is stopped either way. What weakens is replay: a
+    # recording containing a blink and both head turns can satisfy whichever
+    # single action is asked, where two steps also had to match the order
+    # within the timeout.
+    #
+    # That residual case needs the attacker to hold a video of the customer
+    # *and* their PIN, since a payment cannot complete without both. Against a
+    # one-in-five failure rate on genuine customers, that is the better trade
+    # here. It would not be at enrollment, which has no challenge at all today
+    # and is where a face gets bound to an account.
+    challenge_steps: int = 1
 
     # How long an idle session survives in the store before being evicted.
     session_ttl_seconds: float = 300.0
