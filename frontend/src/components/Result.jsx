@@ -42,7 +42,10 @@ export function Result({ result, onAgain, onEnrol }) {
   const outcome = refused
     ? OUTCOMES.refused
     : (OUTCOMES[result.decision] ?? OUTCOMES.no_match);
-  const { top, runnerUp, margin } = result.confidence;
+  // Destructuring this directly would throw when a path reaches here without
+  // it, and a thrown render is a blank screen with nothing to read -- which is
+  // a worse failure than a missing number.
+  const { top, runnerUp, margin } = result.confidence ?? {};
 
   return (
     <div className="screen">
@@ -70,12 +73,14 @@ export function Result({ result, onAgain, onEnrol }) {
         </div>
       </dl>
 
-      <p className="note">
-        Compared against <strong>{result.gallerySize}</strong>{' '}
-        {result.gallerySize === 1 ? 'enrolled face' : 'enrolled faces'}. The gap
-        between the best match and the runner-up is what decides whether the
-        system is confident or merely guessing.
-      </p>
+      {result.gallerySize != null && (
+        <p className="note">
+          Compared against <strong>{result.gallerySize}</strong>{' '}
+          {result.gallerySize === 1 ? 'enrolled face' : 'enrolled faces'}. The
+          gap between the best match and the runner-up is what decides whether
+          the system is confident or merely guessing.
+        </p>
+      )}
 
       <div className="stack">
         <button className="btn btn-primary" onClick={onAgain}>
