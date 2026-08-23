@@ -336,20 +336,18 @@ class Settings(BaseSettings):
     # faces in those samples score 0.999 and 1.000, so there is a wide gap to
     # sit in.
     #
-    # Still not calibrated on the camera this runs on -- this is a reading of
-    # eight attempts from one, not a measurement. There, three screen replays
-    # scored 0.006, 0.110 and 0.225 while everything the models called real
-    # scored 0.572 and above, so the gap sits between 0.23 and 0.57 and 0.70
-    # is inside it with room either side.
+    # Uncalibrated, and the readings it was previously set from are void.
     #
-    # It went up from 0.55 because one attempt at 0.572 got through, and the
-    # things that were clearly blocked stayed far below. The cost of being
-    # wrong is not symmetric -- a false rejection is a customer asked to try
-    # again, a false acceptance is a photograph taking money -- which is the
-    # argument for the higher of two defensible numbers rather than the lower.
+    # Those came from frames that had been through CLAHE before reaching the
+    # models, which rewrites the lightness channel that chroma texture is
+    # computed from. On one live capture that alone moved the score from 0.90
+    # to 0.27 -- from "real face" to "screen photo". Every verdict recorded
+    # before the raw frame was routed here was measuring that mistake, so the
+    # numbers they suggested mean nothing.
     #
-    # Settle it properly with tools/collect_pad.py and tools/silent_pad.py
-    # --data, which give a labelled table instead of a reading.
+    # 0.70 is kept as a starting point rather than a finding. What settles it
+    # is tools/collect_pad.py and tools/silent_pad.py --data, run on the camera
+    # this will serve, which give a labelled table instead of a reading.
     pad_threshold: float = 0.70
 
     # Whether a verdict actually stops a payment, or is only recorded.

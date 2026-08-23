@@ -795,3 +795,90 @@ footer {
     animation: none;
   }
 }
+
+/* -- portal ------------------------------------------------------------ */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow-x: auto;
+  /* The row scrolls rather than wrapping, so four tabs on a narrow phone stay
+     one row instead of becoming two of unequal width. */
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  flex: 1 0 auto;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.tab.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.plain-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.plain-list li {
+  padding-left: 18px;
+  position: relative;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.plain-list li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.6em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.split-links {
+  display: flex;
+  gap: 10px;
+}
+
+.split-links .btn {
+  flex: 1;
+}
+
+/* Deleting face data is irreversible, and the button should not look like the
+   one next to it. */
+.btn-danger {
+  background: var(--danger);
+  color: #1a0405;
+  font-weight: 600;
+}
+
+.btn-danger:disabled {
+  background: var(--surface-2);
+  color: var(--muted);
+}

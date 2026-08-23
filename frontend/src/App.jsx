@@ -182,13 +182,18 @@ export default function App() {
           in that list.
         </p>
 
-        {/* One link can be shared with everyone: customers register here,
-            and the shopkeeper reaches their own terminal from the same page.
-            The till is a separate screen behind a login, not a mode of this
-            one — nothing customer-facing should carry code that charges. */}
-        <a className="btn btn-ghost" href="/till">
-          I'm a merchant — open the till
-        </a>
+        {/* One link can be shared with everyone, and the two audiences part
+            here. Both destinations are separate screens behind their own
+            logins rather than modes of this one — nothing customer-facing
+            should carry code that charges money. */}
+        <div className="split-links">
+          <a className="btn btn-ghost" href="/account">
+            See my payments
+          </a>
+          <a className="btn btn-ghost" href="/till">
+            I'm a merchant
+          </a>
+        </div>
       </div>
     );
   }

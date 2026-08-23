@@ -51,6 +51,10 @@ class VerificationSession:
     created_at: float = field(default_factory=time.monotonic)
     last_seen_at: float = field(default_factory=time.monotonic)
     best_frame: np.ndarray | None = None
+    # The same frame before CLAHE. The anti-spoof models read chroma texture,
+    # which lighting normalisation rewrites, so they need the untouched pixels
+    # while recognition needs the conditioned ones.
+    best_raw_frame: np.ndarray | None = None
     best_frame_score: float = 0.0
     best_frame_sharpness: float = 0.0
     probe_embedding: np.ndarray | None = None
@@ -64,7 +68,14 @@ class VerificationSession:
     def is_expired(self) -> bool:
         return time.monotonic() - self.last_seen_at > settings.session_ttl_seconds
 
-    def offer_frame(self, frame: np.ndarray, score: float, *, sharpness: float) -> bool:
+    def offer_frame(
+        self,
+        frame: np.ndarray,
+        score: float,
+        *,
+        sharpness: float,
+        raw: np.ndarray | None = None,
+    ) -> bool:
         """Keep this frame if it beats the best one seen so far.
 
         Sharpness is carried alongside the composite score so the winner can be
@@ -75,6 +86,7 @@ class VerificationSession:
         if score <= self.best_frame_score:
             return False
         self.best_frame = frame.copy()
+        self.best_raw_frame = raw.copy() if raw is not None else frame.copy()
         self.best_frame_score = score
         self.best_frame_sharpness = sharpness
         return True

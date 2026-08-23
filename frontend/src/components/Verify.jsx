@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { api, explain } from '../api.js';
+import { createAnnouncer, speech, SPOKEN } from '../speech.js';
 import { useCamera } from '../useCamera.js';
 import { CameraStage } from './CameraStage.jsx';
 
@@ -36,6 +37,10 @@ export function Verify({ merchantId, onDone, onCancel }) {
   const [identified, setIdentified] = useState(null);
   const [pin, setPin] = useState('');
   const [pinProblem, setPinProblem] = useState(null);
+
+  // One announcer per screen, so the same line is not repeated on every
+  // re-render of a camera loop that runs many times a second.
+  const [announcer] = useState(createAnnouncer);
   const [liveness, setLiveness] = useState(null);
   const [error, setError] = useState(null);
 
@@ -147,6 +152,9 @@ export function Verify({ merchantId, onDone, onCancel }) {
         // A match is one factor. The PIN is the other, and without it the
         // kiosk would be single-factor while the till is two.
         if (result.decision === 'matched') {
+          // The name last, so the useful half arrives even if the listener
+          // stops attending partway through.
+          speech.say(SPOKEN.recognised(result.user.displayName));
           setIdentified(result);
           setPin('');
           setPinProblem(null);
@@ -154,6 +162,9 @@ export function Verify({ merchantId, onDone, onCancel }) {
           return;
         }
 
+        speech.say(
+          result.decision === 'ambiguous' ? SPOKEN.ambiguous : SPOKEN.notRecognised,
+        );
         onDoneRef.current(result);
       })
       .catch((cause) => {
@@ -180,6 +191,7 @@ export function Verify({ merchantId, onDone, onCancel }) {
       // A wrong PIN with tries left keeps the scan, so one mistyped digit does
       // not cost another round in front of the camera.
       if (result.pinOutcome === 'wrong_pin') {
+        speech.say(SPOKEN.wrongPin);
         setPinProblem(result.reason);
         setPin('');
         setPhase('pin');
@@ -206,6 +218,25 @@ export function Verify({ merchantId, onDone, onCancel }) {
       />
     );
   }
+
+  // Said rather than only shown: the person is looking at a camera rather
+  // than at text, and someone who cannot read the prompt still needs to know
+  // what to do. In an effect because speaking during render happens again on
+  // every re-render, and twice under StrictMode.
+  useEffect(() => {
+    if (phase !== 'scanning') return;
+    announcer.announce(
+      liveness?.faceDetected
+        ? liveness.totalSteps === 0
+          ? SPOKEN.scanning
+          : liveness.prompt
+        : SPOKEN.noFace,
+    );
+  }, [phase, announcer, liveness?.faceDetected, liveness?.prompt, liveness?.totalSteps]);
+
+  useEffect(() => {
+    if (phase === 'rejected') speech.say(spokenFailure(liveness?.failureReason));
+  }, [phase, liveness?.failureReason]);
 
   if (phase === 'error') {
     return (
@@ -396,4 +427,12 @@ function PinStep({ name, pin, onPin, problem, busy, onSubmit, onCancel }) {
       </button>
     </div>
   );
+}
+
+/** What a liveness refusal should sound like, which is not what it reads like. */
+function spokenFailure(reason) {
+  if (!reason) return SPOKEN.livenessFailed;
+  if (reason.startsWith('presentation_attack')) return SPOKEN.presentationAttack;
+  if (reason === 'too_many_faces') return SPOKEN.tooManyFaces;
+  return SPOKEN.livenessFailed;
 }

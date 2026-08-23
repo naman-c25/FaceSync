@@ -4,6 +4,7 @@ import { api, explain } from '../api.js';
 import { CameraStage } from '../components/CameraStage.jsx';
 import { useCamera } from '../useCamera.js';
 import { merchantApi } from './api.js';
+import { createAnnouncer, speech, SPOKEN } from '../speech.js';
 import { Receipt } from './Receipt.jsx';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,6 +27,7 @@ export function Till({ merchant, onSignOut }) {
   const [error, setError] = useState(null);
   const [pin, setPin] = useState('');
   const [pinPrompt, setPinPrompt] = useState(null);
+  const [announcer] = useState(createAnnouncer);
 
   const camera = useCamera(phase === 'scanning');
   // Read through a ref so submitting a PIN does not re-run the charge effect
@@ -128,10 +130,22 @@ export function Till({ merchant, onSignOut }) {
         // Identified, but the second factor is still outstanding. The till
         // could not have asked sooner — it did not know whose PIN to want.
         if (result.needsPin) {
+          // The shopkeeper hears who was recognised without looking up from
+          // the counter, and the customer hears their own name confirmed
+          // before being asked to approve.
+          speech.say(SPOKEN.recognised(result.customer.name));
           setPinPrompt(result);
           setPin('');
           setPhase('pin');
           return;
+        }
+
+        if (result.charged) {
+          speech.say(SPOKEN.paid(rupees, result.customer.name));
+        } else if (result.pinOutcome === 'locked') {
+          speech.say(SPOKEN.pinLocked);
+        } else if (!result.customer) {
+          speech.say(SPOKEN.notRecognised);
         }
 
         setOutcome(result);
@@ -157,6 +171,22 @@ export function Till({ merchant, onSignOut }) {
     setError(null);
     setPhase('amount');
   }, []);
+
+  // See the note in Verify: announcements go in effects, not in render.
+  useEffect(() => {
+    if (phase !== 'scanning') return;
+    announcer.announce(
+      liveness?.faceDetected
+        ? liveness.totalSteps === 0
+          ? SPOKEN.scanning
+          : liveness.prompt
+        : SPOKEN.noFace,
+    );
+  }, [phase, announcer, liveness?.faceDetected, liveness?.prompt, liveness?.totalSteps]);
+
+  useEffect(() => {
+    if (phase === 'rejected') speech.say(spokenFailure(liveness?.failureReason));
+  }, [phase, liveness?.failureReason]);
 
   if (phase === 'amount') {
     return (
@@ -483,4 +513,12 @@ function PinEntry({ prompt, amount, pin, onPin, onSubmit, onCancel }) {
       </button>
     </div>
   );
+}
+
+/** What a liveness refusal should sound like, which is not what it reads like. */
+function spokenFailure(reason) {
+  if (!reason) return SPOKEN.livenessFailed;
+  if (reason.startsWith('presentation_attack')) return SPOKEN.presentationAttack;
+  if (reason === 'too_many_faces') return SPOKEN.tooManyFaces;
+  return SPOKEN.livenessFailed;
 }

@@ -114,7 +114,7 @@ app = FastAPI(
 
 def _prepare_frame(
     request: FrameRequest,
-) -> tuple[np.ndarray | None, preprocessing.FrameQuality]:
+) -> tuple[np.ndarray | None, preprocessing.FrameQuality, np.ndarray | None]:
     """Decode and condition one frame, without judging whether to keep it.
 
     Only genuinely undecodable bytes fail here. Whether a frame is *good
@@ -124,13 +124,19 @@ def _prepare_frame(
     Both go through here so a face is preprocessed identically at both ends.
     CLAHE applied during enrollment but not verification would shift the
     embeddings apart and quietly wreck every similarity score.
+
+    The raw decode comes back too, and it is not a convenience. CLAHE
+    redistributes the lightness channel, which is exactly what the anti-spoof
+    models read -- run them on a conditioned frame and a genuine face scores
+    0.27 where the same face raw scores 0.90, so every verdict inverts. Those
+    models get the untouched pixels; recognition gets the conditioned ones.
     """
     image = preprocessing.decode_image(request.image_bytes)
     if image is None:
-        return None, preprocessing.FrameQuality(False, 0.0, 0.0, "undecodable_image")
+        return None, preprocessing.FrameQuality(False, 0.0, 0.0, "undecodable_image"), None
 
     quality = preprocessing.assess_frame(image)
-    return preprocessing.normalize_lighting(image), quality
+    return preprocessing.normalize_lighting(image), quality, image
 
 
 def _single_usable_face(
@@ -214,7 +220,7 @@ def enroll_capture(request: FrameRequest) -> EnrollmentCaptureResponse:
     # Enrollment applies the quality gate strictly. The user is standing right
     # there, so asking for another frame costs a second — whereas a soft sample
     # averaged into the stored identity degrades every future match.
-    frame, quality = _prepare_frame(request)
+    frame, quality, raw = _prepare_frame(request)
     if frame is None or not quality.acceptable:
         session.rejected_frames += 1
         return EnrollmentCaptureResponse(
@@ -233,6 +239,26 @@ def enroll_capture(request: FrameRequest) -> EnrollmentCaptureResponse:
             samples_collected=len(session.samples),
             samples_required=settings.min_enrollment_samples,
             reason=reason,
+            sharpness=round(quality.sharpness, 2),
+        )
+
+    # Anti-spoof on every enrollment sample, not just at the till.
+    #
+    # This is the more important of the two places, and until now it had no
+    # liveness of any kind. A fraudulent payment is one transaction; a
+    # fraudulent enrollment binds somebody's face to an account the attacker
+    # controls, permanently, and every later payment made with it looks
+    # perfectly legitimate. Registering from a photograph off social media was
+    # simply possible.
+    # The raw decode, never the CLAHE-conditioned one -- see _prepare_frame.
+    verdict = pad.assess(raw, face.bbox)
+    if verdict.is_attack and settings.pad_enforce:
+        session.rejected_frames += 1
+        return EnrollmentCaptureResponse(
+            accepted=False,
+            samples_collected=len(session.samples),
+            samples_required=settings.min_enrollment_samples,
+            reason=f"presentation_attack:{verdict.label_text}",
             sharpness=round(quality.sharpness, 2),
         )
 
@@ -409,7 +435,7 @@ def _consume_frame(session: VerificationSession, request: CapturedFrame) -> bool
     #
     # A frame too soft to embed still cannot become the probe: sharpness feeds
     # the best-frame score, and _extract_probe checks it again.
-    frame, quality = _prepare_frame(request)
+    frame, quality, raw = _prepare_frame(request)
     usable = frame is not None and quality.sharpness >= settings.min_sharpness_liveness
     geometry = face_detection.analyse(frame) if usable else None
 
@@ -428,6 +454,7 @@ def _consume_frame(session: VerificationSession, request: CapturedFrame) -> bool
             frame,
             frame_quality_score(geometry, quality.sharpness),
             sharpness=quality.sharpness,
+            raw=raw,
         )
 
     # Driven by when the frame was captured, not when it arrived.
@@ -461,7 +488,10 @@ def _extract_probe(session: VerificationSession) -> None:
     # Here rather than per-frame because it is the frame the payment will rest
     # on, and running it fifty times a session would cost fifty times as much
     # to answer the same question.
-    verdict = pad.assess(session.best_frame, face.bbox)
+    # The raw frame, for the reason given in _prepare_frame. Falling back to
+    # the conditioned one would be worse than not running at all, since it
+    # inverts genuine faces into attacks.
+    verdict = pad.assess(session.best_raw_frame, face.bbox)
     session.spoof = verdict
 
     # `available` is False when the models could not be given the crop they

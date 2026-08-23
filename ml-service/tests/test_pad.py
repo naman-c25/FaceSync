@@ -197,3 +197,85 @@ class TestAgainstRealAttacks:
         assert verdict.available is False
         assert verdict.is_attack is False
         assert verdict.crop_scale < settings.pad_min_crop_scale
+
+
+@needs_models
+class TestTheFrameItIsGiven:
+    """Which frame reaches these models decides whether they work at all.
+
+    Lighting normalisation rewrites the lightness channel, and chroma texture is
+    the entire signal here -- so a conditioned frame does not merely degrade the
+    verdict, it can invert it. Recognition needs the conditioned pixels and
+    these models need the untouched ones, and the pipeline hands each what it
+    needs.
+
+    How much it matters depends on the image: a well-exposed one barely moves,
+    while one CLAHE has real work to do on swings from 0.90 to 0.27. That is
+    what makes it dangerous rather than obvious -- it would look fine on the
+    photographs someone happened to test with.
+    """
+
+    def test_the_pipeline_keeps_a_raw_frame_to_judge_from(self):
+        """Structural, because the numeric effect varies by image.
+
+        `_prepare_frame` returning the raw decode alongside the conditioned one
+        is the whole fix. If it ever returns only the conditioned frame again,
+        the models get their signal rewritten and every verdict silently
+        becomes untrustworthy -- so this asserts the wiring rather than a
+        score.
+        """
+        import base64
+
+        import cv2
+        from app import _prepare_frame
+        from schemas import FrameRequest
+
+        # Uneven lighting, so CLAHE genuinely has something to change.
+        image = np.zeros((240, 320, 3), dtype=np.uint8)
+        for x in range(320):
+            image[:, x] = (30 + x // 3, 40 + x // 4, 60 + x // 5)
+
+        ok, buffer = cv2.imencode(".jpg", image)
+        assert ok
+        request = FrameRequest(
+            session_id="x", image_b64=base64.b64encode(buffer.tobytes()).decode()
+        )
+
+        conditioned, _quality, raw = _prepare_frame(request)
+
+        assert raw is not None, "no raw frame was kept for the anti-spoof models"
+        assert not np.array_equal(conditioned, raw), (
+            "the conditioned and raw frames are identical, so this test is not "
+            "measuring what it was written for"
+        )
+
+    def test_the_best_frame_keeps_both_versions(self):
+        from liveness import LivenessSession
+        from session_store import VerificationSession
+
+        session = VerificationSession(
+            session_id="x", liveness=LivenessSession("x", [])
+        )
+        conditioned = np.full((80, 80, 3), 200, dtype=np.uint8)
+        raw = np.full((80, 80, 3), 100, dtype=np.uint8)
+
+        session.offer_frame(conditioned, 1.0, sharpness=100.0, raw=raw)
+
+        assert np.array_equal(session.best_frame, conditioned)
+        assert np.array_equal(session.best_raw_frame, raw)
+
+    def test_a_frame_offered_without_a_raw_copy_still_has_one(self):
+        # Anything that forgets to pass it gets the conditioned frame rather
+        # than None, so the models see something rather than crashing.
+        from liveness import LivenessSession
+        from session_store import VerificationSession
+
+        session = VerificationSession(
+            session_id="x", liveness=LivenessSession("x", [])
+        )
+        frame = np.full((80, 80, 3), 200, dtype=np.uint8)
+
+        session.offer_frame(frame, 1.0, sharpness=100.0)
+
+        assert session.best_raw_frame is not None
+        assert np.array_equal(session.best_raw_frame, frame)

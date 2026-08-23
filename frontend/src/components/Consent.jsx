@@ -49,8 +49,17 @@ export function Consent({ onAccept }) {
           <li>
             <span className="mark no">✕</span>
             <span>
-              No phone number, email, or anything else that identifies you off
-              this system.
+              <strong>Registering asks for no phone number and no email.</strong>{' '}
+              Paying never needs one either — you are recognised by your face
+              alone. If you later want to see your own payments from home you
+              can add an email then, and that is a separate choice.
+            </span>
+          </li>
+          <li>
+            <span className="mark">✓</span>
+            <span>
+              You can delete your face data yourself, at any time, and it is a
+              real deletion rather than a hidden flag.
             </span>
           </li>
           <li>

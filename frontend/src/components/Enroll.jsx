@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, explain } from '../api.js';
+import { createAnnouncer, speech, SPOKEN } from '../speech.js';
 import { useCamera } from '../useCamera.js';
 import { CameraStage } from './CameraStage.jsx';
 
@@ -24,6 +25,7 @@ export function Enroll({ onDone, onCancel }) {
   const [rejection, setRejection] = useState(null);
   const [countdown, setCountdown] = useState(3);
   const [error, setError] = useState(null);
+  const [announcer] = useState(createAnnouncer);
 
   const camera = useCamera(phase === 'capturing');
   const busy = useRef(false);
@@ -67,9 +69,14 @@ export function Enroll({ onDone, onCancel }) {
       setCollected(result.samplesCollected);
       setRejection(result.accepted ? null : explain(result.reason));
 
+      // A rejected sample is the moment guidance is worth hearing: the person
+      // is holding still for the next countdown and not reading the screen.
+      if (!result.accepted) speech.say(explain(result.reason));
+
       if (result.samplesCollected >= result.samplesRequired) {
         setPhase('finalising');
         const done = await api.finalizeEnrollment(session.sessionId, pinRef.current);
+        speech.say(SPOKEN.registered(done.displayName ?? name.trim()));
         onDoneRef.current({ ...done, name: name.trim() });
       }
     } catch (cause) {
