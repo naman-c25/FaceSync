@@ -43,6 +43,11 @@ class DetectedFace:
     def height(self) -> int:
         return self.bbox[3] - self.bbox[1]
 
+    @property
+    def bbox_area(self) -> int:
+        """Only ever compared against another face in the same frame."""
+        return max(self.bbox[2] - self.bbox[0], 0) * max(self.height, 0)
+
 
 @dataclass(frozen=True)
 class GalleryEntry:

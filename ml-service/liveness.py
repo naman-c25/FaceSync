@@ -91,6 +91,10 @@ class LivenessSignals:
     frames_processed: int = 0
     frames_without_face: int = 0
     frames_ear_unusable: int = 0
+    # Frames discarded for holding two faces of comparable size. Separates "the
+    # camera could not see you" from "it could not tell which of you it was",
+    # which look identical from the outside and need opposite advice.
+    frames_crowded: int = 0
     blinks_detected: int = 0
     longest_blink_ms: float = 0.0
     ear_min: float | None = None
@@ -280,7 +284,17 @@ class LivenessSession:
         self._baseline_samples = []
 
         if self._consecutive_missing >= settings.max_consecutive_missing_face:
-            self._finish(LivenessStatus.FAILED, "face_lost")
+            # A frame dropped for holding two comparable faces is not a frame
+            # with nobody in it, and telling someone their face left the frame
+            # while they are standing directly in front of the camera is worse
+            # than saying nothing. The two need opposite advice -- move back
+            # into shot, versus ask the person behind you to step aside -- so
+            # whichever cause dominated the run is the one reported.
+            crowded = self.signals.frames_crowded > self.signals.frames_without_face / 2
+            self._finish(
+                LivenessStatus.FAILED,
+                "too_many_faces" if crowded else "face_lost",
+            )
         return self._outcome()
 
     # -- per-action progress -------------------------------------------

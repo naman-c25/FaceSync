@@ -204,7 +204,7 @@ export function Enroll({ onDone, onCancel }) {
 
   return (
     <div className="screen">
-      <CameraStage camera={camera}>
+      <CameraStage camera={camera} guide={rejection ? 'warn' : 'ok'}>
         <span className="pill">
           <i className="dot live" />
           Sample {Math.min(collected + 1, required)} of {required}

@@ -72,6 +72,15 @@ class FaceGeometry:
     head_yaw: float  # 0.5 = square to camera, rises as the head turns image-right
     frontality: float  # 1.0 = head-on, 0.0 = full profile
 
+    # How many faces the mesh found, and how far the largest one stands out
+    # from the next. This only reports the crowd; what to do about it is the
+    # caller's decision. `inf` means there was nothing to compete with.
+    #
+    # Defaulted so the synthetic geometry the liveness tests are built from
+    # does not have to care, since none of it is about crowds.
+    faces_seen: int = 1
+    dominance: float = float("inf")
+
     @property
     def ear_is_meaningful(self) -> bool:
         """Whether EAR can be read at all on this frame.
@@ -110,7 +119,7 @@ def _get_detector():
                     # session with monotonic timestamps — and the liveness
                     # state machine already does its own analysis over time.
                     running_mode=vision.RunningMode.IMAGE,
-                    num_faces=settings.max_faces_in_frame,
+                    num_faces=settings.face_candidates,
                 )
                 _detector = vision.FaceLandmarker.create_from_options(options)
     return _detector
@@ -145,6 +154,17 @@ def eye_aspect_ratio(
 
     heights = sum(_euclidean(points, upper, lower) for upper, lower in vertical_pairs)
     return heights / (2.0 * width)
+
+
+def _landmark_area(landmarks) -> float:
+    """Bounding-box area of one face's landmarks, in normalised units.
+
+    Only ever compared against another face in the same frame, so the units
+    cancel and there is no need to scale into pixels.
+    """
+    xs = [lm.x for lm in landmarks]
+    ys = [lm.y for lm in landmarks]
+    return (max(xs) - min(xs)) * (max(ys) - min(ys))
 
 
 def _axis_ratio(points: np.ndarray, iris: int, start: int, end: int) -> float:
@@ -204,7 +224,22 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
         return None
 
     height, width = bgr.shape[:2]
-    normalised = result.face_landmarks[0]
+
+    # Pick the largest face rather than whichever the model ranked first, and
+    # measure how far it stands out. Both stages have to land on the same
+    # person: liveness reads this mesh and the embedding comes from the
+    # detector, so if they ever disagreed the challenge would be measuring one
+    # person while the payment charged another. Largest-by-area is a rule the
+    # detector can apply identically, which is what keeps them together.
+    areas = sorted((_landmark_area(f), i) for i, f in enumerate(result.face_landmarks))
+    largest_area, largest_index = areas[-1]
+
+    dominance = float("inf")
+    if len(areas) > 1:
+        runner_up = areas[-2][0]
+        dominance = largest_area / runner_up if runner_up > 0 else float("inf")
+
+    normalised = result.face_landmarks[largest_index]
 
     if len(normalised) < LANDMARKS_WITH_IRIS:
         raise RuntimeError(
@@ -247,6 +282,8 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
 
     return FaceGeometry(
         landmarks=points,
+        faces_seen=len(result.face_landmarks),
+        dominance=round(dominance, 3) if dominance != float("inf") else dominance,
         ear=0.5 * (ear_left + ear_right),
         ear_left=round(ear_left, 4),
         ear_right=round(ear_right, 4),

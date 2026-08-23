@@ -30,9 +30,32 @@ class Settings(BaseSettings):
     # to embed reliably. Rejecting early is cheaper than matching a blurry face.
     min_face_height_ratio: float = 0.15
 
-    # Reject frames with more than one face — at a kiosk, an extra face in view
-    # is ambiguous about who is actually paying.
+    # An extra face in view is ambiguous about who is actually paying, and a
+    # kiosk must never guess. Rejecting outright is the safe answer and was the
+    # original one — but in a busy shop there is nearly always somebody in the
+    # background, and a terminal that refuses every frame is not a terminal.
+    #
+    # So one face may be accepted alongside others, but only when it is
+    # unmistakably the subject: at least this many times the area of the next
+    # largest. Distance does the work. Someone at the till is roughly half a
+    # metre from the lens and someone browsing behind them is two or three, and
+    # apparent size falls with the square of that — so the person paying is
+    # comfortably four to thirty times larger in frame. Three is well inside
+    # that and well outside anything two people standing together produce.
+    #
+    # Below the ratio the frame is refused, which is the whole point: two faces
+    # of comparable size means the system genuinely cannot tell which of them is
+    # paying, and picking the bigger one would be a coin flip charged to
+    # somebody's account.
     max_faces_in_frame: int = 1
+    face_dominance_ratio: float = 3.0
+
+    # How many faces the landmark model is allowed to return so the rule above
+    # can be applied to it as well. Both stages have to agree on *which* face is
+    # the subject: liveness reads the mesh and the embedding comes from the
+    # detector, and if those two ever picked different people the challenge
+    # would be measuring one person while the payment charged another.
+    face_candidates: int = 3
 
     # Laplacian variance below this means the frame is too blurry to embed.
     # Applies to enrollment samples and to the frame finally matched against.

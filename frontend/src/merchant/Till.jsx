@@ -255,7 +255,7 @@ export function Till({ merchant, onSignOut }) {
 
   return (
     <div className="screen">
-      <CameraStage camera={camera}>
+      <CameraStage camera={camera} guide={liveness?.faceDetected ? 'ok' : 'warn'}>
         <span className={`pill${liveness?.faceDetected ? '' : ' warn'}`}>
           <i className="dot live" />₹{rupees}
         </span>

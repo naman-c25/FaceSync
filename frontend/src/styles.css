@@ -610,3 +610,53 @@ footer {
   font-weight: 560;
   color: var(--muted);
 }
+
+/* -- face framing guide ------------------------------------------------ */
+
+/* Sits between the video and the overlay, so prompts still read on top of it.
+   Purely presentational: the frame sent to the server is never cropped to this
+   shape, and the server does its own multiple-face check regardless. */
+.face-guide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.face-guide-shade {
+  fill: rgba(0, 0, 0, 0.44);
+}
+
+.face-guide-ring {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 2;
+  stroke-dasharray: 10 8;
+  /* Colour and dash both animate, so a state change is legible at a glance
+     without anyone having to read the prompt underneath it. */
+  transition:
+    stroke 220ms ease,
+    stroke-dasharray 220ms ease;
+}
+
+.face-guide-ok .face-guide-ring {
+  stroke: var(--accent);
+  stroke-dasharray: none;
+  stroke-width: 3;
+}
+
+.face-guide-ok .face-guide-shade {
+  fill: rgba(0, 0, 0, 0.3);
+}
+
+.face-guide-warn .face-guide-ring {
+  stroke: var(--warn);
+  stroke-dasharray: 6 6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .face-guide-ring {
+    transition: none;
+  }
+}

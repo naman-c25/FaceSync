@@ -69,7 +69,11 @@ const REASONS = {
   frame_too_dark: 'Too dark. Find brighter light',
   frame_overexposed: 'Too bright. Move away from the light behind you',
   no_face_detected: 'No face found. Centre yourself in the frame',
-  multiple_faces_detected: 'More than one face in view',
+  // Both mean the same thing to the person standing there, and both are only
+  // raised when a second face is close enough in size to be ambiguous -- a
+  // bystander in the background no longer blocks anything.
+  multiple_faces_detected: 'Someone else is in shot. Step closer to the camera',
+  too_many_faces: 'Someone else is in shot. Step closer to the camera',
   face_too_small: 'Move closer to the camera',
   low_detection_confidence: 'Face unclear. Try better lighting',
   undecodable_image: 'The frame did not come through. Trying again',

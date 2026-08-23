@@ -139,10 +139,23 @@ def _single_usable_face(
 
     if not faces:
         return None, "no_face_detected"
+
+    # With more than one face in view, the largest is taken only when it is
+    # unmistakably the subject. Distance does the work: the person at the till
+    # is half a metre from the lens and anyone behind them is two or three, and
+    # apparent size falls with the square of that.
+    #
+    # Below the ratio this refuses, and that refusal is the point. Two faces of
+    # comparable size means the system genuinely cannot tell which of them is
+    # paying, and picking the bigger one would be a coin flip charged to
+    # somebody's account.
+    faces = sorted(faces, key=lambda f: f.bbox_area, reverse=True)
+
     if len(faces) > settings.max_faces_in_frame:
-        # At a kiosk an extra face in view makes it genuinely unclear who is
-        # paying, so this rejects rather than guessing at the largest one.
-        return None, "multiple_faces_detected"
+        runner_up = faces[settings.max_faces_in_frame].bbox_area
+        dominance = faces[0].bbox_area / runner_up if runner_up > 0 else float("inf")
+        if dominance < settings.face_dominance_ratio:
+            return None, "multiple_faces_detected"
 
     face = faces[0]
     if face.det_score < settings.det_score_threshold:
@@ -397,6 +410,16 @@ def _consume_frame(session: VerificationSession, request: CapturedFrame) -> bool
     frame, quality = _prepare_frame(request)
     usable = frame is not None and quality.sharpness >= settings.min_sharpness_liveness
     geometry = face_detection.analyse(frame) if usable else None
+
+    # The same dominance rule the embedding path applies, applied here too.
+    # Without it liveness would happily read the mesh of whoever the model
+    # ranked first while the payment charged the face the detector picked --
+    # so a bystander's blinks could satisfy a challenge for the person in
+    # front of them. Both stages choose the largest face, which is what keeps
+    # them on the same person.
+    if geometry is not None and geometry.dominance < settings.face_dominance_ratio:
+        session.liveness.signals.frames_crowded += 1
+        geometry = None
 
     if usable and geometry is not None:
         session.offer_frame(
