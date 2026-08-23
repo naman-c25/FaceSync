@@ -7,11 +7,16 @@
  * costs recognition accuracy for no security gain. Nothing here decides
  * anything; the server still sees, and still refuses, a second face.
  *
- * What it does buy is framing. People fill the shape they are given, which
- * puts the face closer to the lens and larger in frame, and both feed straight
- * into sharpness and the minimum face height the server insists on. It also,
- * without having to say so, discourages standing somewhere with another person
- * in shot behind you.
+ * What it does buy is framing, and the size of it is now load-bearing. People
+ * fill the shape they are given, and the anti-spoof models need the face at
+ * roughly 38-50% of frame height -- that is where every reference sample they
+ * classify correctly sits, while a face filling the frame collapses their crop
+ * to 1.2 and the verdict gets thrown away. So this oval is 44% of the frame
+ * rather than the 63% it started at: far enough back for the spoof check, still
+ * comfortably above the server's minimum face height and its sharpness floor.
+ *
+ * It also, without having to say so, discourages standing somewhere with
+ * another person in shot behind you.
  */
 function FaceGuide({ tone }) {
   return (
@@ -24,7 +29,7 @@ function FaceGuide({ tone }) {
       <defs>
         <mask id="face-guide-cutout">
           <rect width="300" height="400" fill="white" />
-          <ellipse cx="150" cy="176" rx="96" ry="127" fill="black" />
+          <ellipse cx="150" cy="182" rx="66" ry="88" fill="black" />
         </mask>
       </defs>
       <rect
@@ -33,7 +38,7 @@ function FaceGuide({ tone }) {
         height="400"
         mask="url(#face-guide-cutout)"
       />
-      <ellipse className="face-guide-ring" cx="150" cy="176" rx="96" ry="127" />
+      <ellipse className="face-guide-ring" cx="150" cy="182" rx="66" ry="88" />
     </svg>
   );
 }

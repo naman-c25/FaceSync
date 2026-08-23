@@ -303,6 +303,52 @@ class Settings(BaseSettings):
     # who this is, and picking the higher score would be a coin flip.
     match_margin: float = 0.08
 
+    # ------------------------------------------------------------------
+    # Presentation attack detection
+    # ------------------------------------------------------------------
+    # Two MiniFASNets from minivision-ai/Silent-Face-Anti-Spoofing, judging
+    # pixels rather than geometry -- ink on paper, a display's pixel grid,
+    # light scattered under real skin. See pad.py for why the two hand-built
+    # geometric checks were measured and abandoned before reaching for this.
+    pad_enabled: bool = True
+
+    # Below this real-class score the face is treated as a presentation attack.
+    #
+    # A threshold rather than argmax, which is what the reference uses and is
+    # the weaker reading: on the project's own samples a held printout scores
+    # 0.728 real, which argmax calls real and a threshold catches. Genuine
+    # faces in those samples score 0.999 and 1.000, so there is a wide gap to
+    # sit in.
+    #
+    # Set low on purpose. It is not yet calibrated on the camera this will run
+    # on, and the two failures are not equal: a false rejection is a customer
+    # asked to try again, while a threshold tuned on somebody else's camera
+    # refusing real people all day is a terminal nobody uses. Raise it once
+    # tools/silent_pad.py --data has numbers from a real capture.
+    pad_threshold: float = 0.55
+
+    # Whether a verdict actually stops a payment, or is only recorded.
+    #
+    # Enforcement is on because a photograph reaching the embedding stage is
+    # the whole problem this exists to solve. Every attempt is logged either
+    # way, so turning this off leaves a full record to tune against without
+    # refusing anyone.
+    pad_enforce: bool = True
+
+    # How far the crop may fall short of what the models were trained on before
+    # their answer stops being worth having.
+    #
+    # Clamping is normal rather than an edge case: the reference project's own
+    # sample images all clamp, landing between 1.90 and 2.62, and the models
+    # classify them correctly there. What is not normal is clamping far down --
+    # the one reference sample they get wrong, a printout held close to the
+    # lens, is also the only one whose crop collapses to 1.21.
+    #
+    # So this sits between the two. Below it there is no verdict rather than a
+    # bad one, and the achieved scale is recorded on every attempt so the floor
+    # can be moved once a real camera has produced numbers.
+    pad_min_crop_scale: float = 1.5
+
     # InsightFace model pack. buffalo_l = SCRFD detector + ArcFace w600k (512-d).
     insightface_model: str = "buffalo_l"
     insightface_root: str = str(BASE_DIR / "models")

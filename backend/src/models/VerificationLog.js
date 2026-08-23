@@ -110,6 +110,19 @@ const verificationLogSchema = new mongoose.Schema(
       framesCrowded: { type: Number, default: 0 },
       passiveFrames: { type: Number, default: 0 },
       passiveMotionPx: { type: Number, default: null },
+
+      // The anti-spoof verdict on the frame the payment rested on, recorded
+      // whether or not it changed the outcome. A near-miss nobody wrote down
+      // is invisible until the day it matters, and this is the record the
+      // threshold gets tuned against.
+      //
+      // `spoofAvailable` false means the models could not be given the crop
+      // they were trained on, which is neither a pass nor a fail. Reading it
+      // as either would be inventing a verdict.
+      spoofAvailable: { type: Boolean, default: false },
+      spoofRealScore: { type: Number, default: null },
+      spoofLabel: { type: String, default: null },
+      spoofModelsUsed: { type: Number, default: 0 },
     },
 
     // Encrypted, and only present on attempts that did not resolve to a user.

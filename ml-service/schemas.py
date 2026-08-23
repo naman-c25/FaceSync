@@ -137,6 +137,14 @@ class LivenessSignalsModel(BaseModel):
     frames_crowded: int = 0
     passive_frames: int = 0
     passive_motion_px: float = 0.0
+
+    # Anti-spoof. `spoof_available` is False when the models could not be given
+    # the crop they were trained on, which is neither a pass nor a fail and
+    # must not be read as one.
+    spoof_available: bool = False
+    spoof_real_score: float | None = None
+    spoof_label: str | None = None
+    spoof_models_used: int = 0
     blinks_detected: int
     ear_min: float | None = None
     ear_max: float | None = None

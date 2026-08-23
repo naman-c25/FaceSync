@@ -163,6 +163,10 @@ export function livenessFields(signals, { passed = true, failureReason = null } 
     framesCrowded: signals.frames_crowded ?? 0,
     passiveFrames: signals.passive_frames ?? 0,
     passiveMotionPx: signals.passive_motion_px ?? null,
+    spoofAvailable: signals.spoof_available ?? false,
+    spoofRealScore: signals.spoof_real_score ?? null,
+    spoofLabel: signals.spoof_label ?? null,
+    spoofModelsUsed: signals.spoof_models_used ?? 0,
   };
 }
 

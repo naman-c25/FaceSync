@@ -55,6 +55,12 @@ class VerificationSession:
     best_frame_sharpness: float = 0.0
     probe_embedding: np.ndarray | None = None
 
+    # What the anti-spoof models made of `best_frame`. Kept on the session so
+    # the match response can carry it into the audit log even when it did not
+    # change the outcome -- a recorded near-miss is what makes the threshold
+    # tunable later, and an unrecorded one is invisible until it matters.
+    spoof: object | None = None
+
     def is_expired(self) -> bool:
         return time.monotonic() - self.last_seen_at > settings.session_ttl_seconds
 

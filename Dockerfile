@@ -72,6 +72,11 @@ USER app
 # that is most people.
 RUN cd ml-service && python setup_models.py
 
+# The anti-spoofing pack, which is 3.4MB against the 300MB above. Baked in for
+# the same reason: a container that downloads a security control on first use
+# is a container that runs without one whenever the network is down.
+RUN cd ml-service && python setup_pad_models.py
+
 ENV PYTHONUNBUFFERED=1 \
     NODE_ENV=production \
     FACEPAY_PORT=8001 \

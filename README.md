@@ -220,39 +220,76 @@ Measured across 86 real attempts, it cost a median 8.0 seconds with two steps
 and failed one attempt in five. One step roughly halves that.
 
 **`passive`** — the mode the demo runs. No prompt and nothing asked: the
-service watches a face for about a second and a half and accepts it. What it
-actually checks is a face present throughout, one face clearly dominant in
-frame, a minimum number of frames over a minimum duration, and frames that are
-not byte-identical to each other.
-
-That last check catches a static image fed straight into the pipeline. **It
-does not catch a photograph held up to the camera**, and this should not be
-described as though it does. Measured on this pipeline, a still photograph
-passes every per-frame gate there is — sharpness 51.9 against a floor of 45,
-detection score 0.865 against 0.60, landmarks found, a usable 512-dimension
-embedding produced. Nothing outside the challenge objects to a photograph.
-
-So in passive mode the honest statement is: **the face identifies, and the PIN
-authorises.** An attacker holding your photograph gets as far as being
-recognised as you and is then stopped by a four-digit secret they do not have.
-That is one factor doing the work of two, and it is a deliberate trade of
-security for speed at the till rather than a claim about spoof resistance.
+service watches a face for about a second and a half, then hands the frame to
+the anti-spoof models below.
 
 Turning the challenge back on is one environment variable, and its tests and
 measurements are all still in the tree.
 
-### What would close the gap
+### Presentation attack detection
 
-Passive presentation attack detection — texture and moiré analysis for screens,
-and the fact that a real face is a three-dimensional object while a photograph
-is a plane, so the landmark configuration of a real face deforms non-rigidly as
-the head moves while a photograph's deforms as a homography.
+Two MiniFASNets from
+[minivision-ai/Silent-Face-Anti-Spoofing](https://github.com/minivision-ai/Silent-Face-Anti-Spoofing)
+(Apache-2.0), converted to ONNX. 3.4MB together, running on the ONNX Runtime
+already loaded for ArcFace, and they classify three ways: paper photo, real
+face, screen photo. Run once per session on the frame the payment rests on.
 
-The honest difficulty is not building it, it is validating it. A detector
-trained on one room, one camera and one printer learns those conditions rather
-than the attack, which is why published cross-dataset error rates are an order
-of magnitude worse than within-dataset ones. A weak passive detector is worse
-than none, because it replaces a known limit with an unknown one.
+Against the reference project's own labelled images, through this pipeline:
+
+```
+image_F1  screen   crop 2.47   real 0.181   BLOCKED
+image_F2  screen   crop 2.05   real 0.002   BLOCKED
+image_F3  screen   crop 2.62   real 0.144   BLOCKED
+image_F5  paper    crop 1.90   real 0.000   BLOCKED
+image_T1  live     crop 2.61   real 1.000   allowed
+image_T2  live     crop 1.95   real 0.999   allowed
+```
+
+Two others never reach the models: one has no detectable face, and one is a
+composite holding two faces of comparable size, which the dominance rule
+refuses first.
+
+**The crop is the whole thing.** The numbers in the model filenames are
+bounding-box expansion factors, and each model was trained on a crop of its own
+size. Handed something tighter they still answer, still confidently, and the
+answer is worth nothing. The reference clamps silently when the expansion will
+not fit — which turns out to be the normal path, since every reference sample
+clamps to between 1.90 and 2.62 and is classified correctly there. What is not
+normal is clamping far down: the single sample the models get wrong is also the
+only one whose crop collapses to 1.21. So there is a floor rather than an exact
+fit, and below it the verdict is *no verdict* rather than a bad one.
+
+That is also why the kiosk's framing oval is 44% of the frame height rather
+than the 63% it started at. A face filling the frame starves the models.
+
+**What this does not claim.** The threshold has not yet been calibrated on the
+camera it will run on, and the authors of the models state the limitation
+plainly themselves: "limited robustness to camera model type and usage
+scenarios". Measured here across a domain shift — 120 LFW captures of real
+people — 9.2% were called attacks, which is why `tools/silent_pad.py --data`
+exists to re-measure on real captures before the threshold moves.
+
+### Two passive checks that were measured and abandoned
+
+Both were built, measured and rejected before reaching for a trained model, and
+both failed for the same reason.
+
+*Planar versus 3D.* A real face is a solid and a photograph is a plane, so
+align two views with the best-fitting homography and a real face should leave a
+residual a flat picture cannot. It does — but to turn away 97% of photographs
+it refuses one real customer in ten, and the test flattered it, since its "real"
+pairs were press photographs years apart rather than someone holding still for a
+second at a kiosk.
+
+*Gaze and eyelid micromotion.* A photograph's gaze is fixed; a living eye
+microsaccades several times a second. Real passive scans move gaze by
+0.032–0.168 over their window. A photograph in an unsteady hand moves it by a
+median of 0.038 — 65% of held photographs reach the floor no live scan fell
+below.
+
+Both measured *geometry*, and on a moving image landmark noise is the same size
+as the biological signal. The models above look at pixels instead, which is a
+different signal and not the one landmark noise destroys.
 
 ## Bugs worth knowing about, because they shaped the design
 

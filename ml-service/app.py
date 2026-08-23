@@ -19,6 +19,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 
 import face_detection
+import pad
 import preprocessing
 import recognition
 from config import settings
@@ -73,6 +74,7 @@ async def lifespan(_: FastAPI):
         # off the event loop rather than blocking startup handling.
         await loop.run_in_executor(None, recognition.warm_up)
         await loop.run_in_executor(None, face_detection.warm_up)
+        await loop.run_in_executor(None, pad.warm_up)
         _models_ready = True
         logger.info("models loaded")
     except Exception:
@@ -455,14 +457,38 @@ def _extract_probe(session: VerificationSession) -> None:
         session.liveness.failure_reason = f"no_matchable_frame:{reason}"
         return
 
+    # Presentation attack detection, on the one frame that decides identity.
+    # Here rather than per-frame because it is the frame the payment will rest
+    # on, and running it fifty times a session would cost fifty times as much
+    # to answer the same question.
+    verdict = pad.assess(session.best_frame, face.bbox)
+    session.spoof = verdict
+
+    # `available` is False when the models could not be given the crop they
+    # were trained on -- see pad.py. That is not a pass and not a fail, and
+    # treating it as either would be inventing a verdict.
+    if verdict.is_attack and settings.pad_enforce:
+        session.liveness.status = LivenessStatus.FAILED
+        session.liveness.failure_reason = f"presentation_attack:{verdict.label_text}"
+        return
+
     session.probe_embedding = face.embedding
 
 
 def _signals(session: VerificationSession) -> LivenessSignalsModel:
     liveness = session.liveness
+    verdict = session.spoof
+
     return LivenessSignalsModel(
         **vars(liveness.signals),
         challenge=[step.prompt for step in liveness.challenge],
+        # Reported whether or not it changed the outcome. A recorded near-miss
+        # is what makes the threshold tunable later; an unrecorded one is
+        # invisible until it matters.
+        spoof_available=bool(verdict and verdict.available),
+        spoof_real_score=verdict.real_score if verdict and verdict.available else None,
+        spoof_label=verdict.label_text if verdict else None,
+        spoof_models_used=verdict.models_used if verdict else 0,
     )
 
 

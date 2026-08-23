@@ -83,10 +83,18 @@ const REASONS = {
   challenge_timeout: 'Took too long — let us try that again',
   frame_budget_exceeded: 'That did not look live. Try again',
   face_lost: 'Your face left the frame',
+  // The anti-spoof models, which name the attack they saw.
+  'presentation_attack:paper photo': 'That looks like a printed photo, not a face',
+  'presentation_attack:screen photo': 'That looks like a screen, not a face',
 };
 
 export function explain(reason) {
   if (!reason) return null;
+  // The server appends which attack it saw, and an unrecognised kind should
+  // still say the useful half rather than fall through to raw text.
+  if (reason.startsWith('presentation_attack')) {
+    return REASONS[reason] ?? 'That did not look like a live face';
+  }
   if (reason.startsWith('no_matchable_frame')) {
     return 'Could not get a clear enough shot. Try again in better light';
   }
