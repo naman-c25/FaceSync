@@ -489,6 +489,7 @@ def _signals(session: VerificationSession) -> LivenessSignalsModel:
         spoof_real_score=verdict.real_score if verdict and verdict.available else None,
         spoof_label=verdict.label_text if verdict else None,
         spoof_models_used=verdict.models_used if verdict else 0,
+        spoof_crop_scale=verdict.crop_scale if verdict else None,
     )
 
 

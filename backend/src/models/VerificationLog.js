@@ -123,6 +123,7 @@ const verificationLogSchema = new mongoose.Schema(
       spoofRealScore: { type: Number, default: null },
       spoofLabel: { type: String, default: null },
       spoofModelsUsed: { type: Number, default: 0 },
+      spoofCropScale: { type: Number, default: null },
     },
 
     // Encrypted, and only present on attempts that did not resolve to a user.

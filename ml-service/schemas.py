@@ -145,6 +145,10 @@ class LivenessSignalsModel(BaseModel):
     spoof_real_score: float | None = None
     spoof_label: str | None = None
     spoof_models_used: int = 0
+    # How far the crop expanded. Below what the models were trained on their
+    # answer degrades, and without this a bad verdict and a starved one look
+    # identical in the log.
+    spoof_crop_scale: float | None = None
     blinks_detected: int
     ear_min: float | None = None
     ear_max: float | None = None
