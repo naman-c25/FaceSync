@@ -475,6 +475,9 @@ def _extract_probe(session: VerificationSession) -> None:
         session.liveness.failure_reason = "no_matchable_frame:frame_too_blurry"
         return
 
+    if not _same_face_throughout(session):
+        return
+
     face, reason = _single_usable_face(session.best_frame)
     if face is None:
         # Liveness proved a live person was present, but no frame in the
@@ -505,6 +508,50 @@ def _extract_probe(session: VerificationSession) -> None:
     session.probe_embedding = face.embedding
 
 
+def _same_face_throughout(session: VerificationSession) -> bool:
+    """Confirm the face that finished the challenge is the one being recognised.
+
+    The probe is whichever frame scored best for quality across the whole
+    session, which leaves a gap: pass the challenge, then hold up a sharp,
+    well-framed photograph, and the photograph wins the probe. Liveness proved
+    a live person was *present*, not that they are the person being identified.
+
+    So an early frame and a late one are embedded and compared. Two views of
+    one person seconds apart, same light and same lens, sit far above the
+    threshold; a swap falls into impostor range with nothing in between.
+
+    Returns True when the session may continue. A session too short to hold
+    two distinct moments is allowed through and recorded as unmeasured, since
+    refusing on the absence of evidence would turn a quick scan into a
+    failure.
+    """
+    if not settings.identity_continuity:
+        return True
+    if session.anchor_frame is None or session.late_frame is None:
+        return True
+
+    anchor, _ = _single_usable_face(session.anchor_frame)
+    late, _ = _single_usable_face(session.late_frame)
+
+    # A frame with no usable face at either end says nothing either way, and
+    # inventing a verdict from it would be worse than not asking.
+    if anchor is None or late is None:
+        return True
+
+    score = float(anchor.embedding @ late.embedding)
+    session.continuity_score = round(score, 4)
+
+    if score >= settings.continuity_threshold:
+        return True
+
+    if not settings.continuity_enforce:
+        return True
+
+    session.liveness.status = LivenessStatus.FAILED
+    session.liveness.failure_reason = "identity_changed"
+    return False
+
+
 def _signals(session: VerificationSession) -> LivenessSignalsModel:
     liveness = session.liveness
     verdict = session.spoof
@@ -520,6 +567,7 @@ def _signals(session: VerificationSession) -> LivenessSignalsModel:
         spoof_label=verdict.label_text if verdict else None,
         spoof_models_used=verdict.models_used if verdict else 0,
         spoof_crop_scale=verdict.crop_scale if verdict else None,
+        continuity_score=session.continuity_score,
     )
 
 

@@ -124,6 +124,12 @@ const verificationLogSchema = new mongoose.Schema(
       spoofLabel: { type: String, default: null },
       spoofModelsUsed: { type: Number, default: 0 },
       spoofCropScale: { type: Number, default: null },
+
+      // Similarity between an early frame and a late one. Null when the
+      // session was too short to hold two distinct moments. Recorded on every
+      // attempt, since what makes the threshold movable later is a record of
+      // what genuine sessions actually score.
+      continuityScore: { type: Number, default: null },
     },
 
     // Encrypted, and only present on attempts that did not resolve to a user.

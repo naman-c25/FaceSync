@@ -86,6 +86,8 @@ const REASONS = {
   // The anti-spoof models, which name the attack they saw.
   'presentation_attack:paper photo': 'That looks like a printed photo, not a face',
   'presentation_attack:screen photo': 'That looks like a screen, not a face',
+  // The face that finished the check was not the face being recognised.
+  identity_changed: 'The face changed during the scan. Start again',
 };
 
 export function explain(reason) {

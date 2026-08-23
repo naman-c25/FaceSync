@@ -59,6 +59,21 @@ class VerificationSession:
     best_frame_sharpness: float = 0.0
     probe_embedding: np.ndarray | None = None
 
+    # Two frames from deliberately different moments, kept so the face that
+    # finished the challenge can be checked against the face that gets
+    # recognised. `anchor` is the best of the session's opening frames and
+    # `late` the best of everything after, so they are never the same frame and
+    # comparing them always says something.
+    anchor_frame: np.ndarray | None = None
+    anchor_score: float = 0.0
+    late_frame: np.ndarray | None = None
+    late_score: float = 0.0
+    frames_offered: int = 0
+
+    # Similarity between those two, once measured. None when the session was
+    # too short to have both.
+    continuity_score: float | None = None
+
     # What the anti-spoof models made of `best_frame`. Kept on the session so
     # the match response can carry it into the audit log even when it did not
     # change the outcome -- a recorded near-miss is what makes the threshold
@@ -83,6 +98,20 @@ class VerificationSession:
         far softer than recognition should, and without this the sharpest of a
         uniformly blurred session would still be embedded.
         """
+        # Counted before the early return: a frame that loses on quality still
+        # happened, and the anchor window is a window in time rather than a
+        # ranking.
+        self.frames_offered += 1
+        opening = self.frames_offered <= settings.continuity_anchor_frames
+
+        if opening:
+            if score > self.anchor_score:
+                self.anchor_frame = frame.copy()
+                self.anchor_score = score
+        elif score > self.late_score:
+            self.late_frame = frame.copy()
+            self.late_score = score
+
         if score <= self.best_frame_score:
             return False
         self.best_frame = frame.copy()

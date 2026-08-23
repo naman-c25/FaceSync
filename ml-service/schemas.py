@@ -149,6 +149,9 @@ class LivenessSignalsModel(BaseModel):
     # answer degrades, and without this a bad verdict and a starved one look
     # identical in the log.
     spoof_crop_scale: float | None = None
+    # Similarity between an early frame and a late one. None when the
+    # session was too short to hold two distinct moments.
+    continuity_score: float | None = None
     blinks_detected: int
     ear_min: float | None = None
     ear_max: float | None = None

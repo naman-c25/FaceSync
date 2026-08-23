@@ -320,6 +320,50 @@ class Settings(BaseSettings):
     match_margin: float = 0.08
 
     # ------------------------------------------------------------------
+    # Session continuity
+    # ------------------------------------------------------------------
+    # Whether the face that finished the liveness challenge is the same one
+    # that gets recognised.
+    #
+    # Without this there is a gap between proving a live person is present and
+    # deciding who they are. An attacker can pass the challenge with their own
+    # face and then hold up a photograph, and since the probe is whichever
+    # frame scored best for quality across the whole session, a sharp,
+    # well-framed photograph can win it.
+    #
+    # Checked with ArcFace rather than by tracking geometry. Two attempts at
+    # judging identity from landmark movement were measured and abandoned here
+    # -- both drowned in landmark noise -- and a careful swap can be
+    # geometrically smooth anyway. Embeddings are the thing that actually
+    # discriminates identity, so they are what this asks.
+    identity_continuity: bool = True
+
+    # Frames from the opening of the session that the anchor is chosen from.
+    # The best frame after that window is what it gets compared against, so the
+    # two are always from genuinely different moments.
+    #
+    # The limit this leaves, stated rather than left to be found: a face
+    # replaced before the window closes becomes the anchor itself, and is then
+    # compared against more of itself. At 15fps that is about two thirds of a
+    # second. Under a challenge the rest of the session still has to be
+    # performed, which a photograph cannot do; under passive liveness it is
+    # genuinely weaker and the anti-spoof models carry that case.
+    continuity_anchor_frames: int = 10
+
+    # Two frames of one person seconds apart, in the same light through the
+    # same lens, are far more alike than that person is to their own enrolled
+    # template from another day -- and those already score 0.87 to 0.89. So
+    # this sits well above the 0.45 match threshold on purpose: a swap drops
+    # into impostor range, around 0.0 to 0.3, and there is nothing in between
+    # for it to hide in.
+    continuity_threshold: float = 0.80
+
+    # Whether a break stops the payment or is only recorded. On, because the
+    # gap it closes is the one an attacker would actually use, and every
+    # session logs its score either way.
+    continuity_enforce: bool = True
+
+    # ------------------------------------------------------------------
     # Presentation attack detection
     # ------------------------------------------------------------------
     # Two MiniFASNets from minivision-ai/Silent-Face-Anti-Spoofing, judging
