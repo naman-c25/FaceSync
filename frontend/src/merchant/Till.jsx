@@ -461,10 +461,24 @@ function Outcome({ outcome, amount, onReceipt, onDone }) {
  */
 function PinEntry({ prompt, amount, pin, onPin, onSubmit, onCancel }) {
   const press = (digit) => {
-    if (pin.length < 4) onPin(pin + digit);
+    if (pin.length >= 4) return;
+    onPin(pin + digit);
   };
 
-  const complete = pin.length === 4;
+  // Same as the kiosk: the fourth digit submits. A customer typing their PIN
+  // at a counter should not then have to hunt for a button, least of all one
+  // that can fall below the fold on a phone-sized till.
+  // Held in a ref because the callback is a new function on every parent
+  // render: depending on it directly would clear and rebuild the timer
+  // each time, and a timer that keeps restarting never fires.
+  const submitRef = useRef(onSubmit);
+  submitRef.current = onSubmit;
+
+  useEffect(() => {
+    if (pin.length !== 4) return undefined;
+    const timer = setTimeout(() => submitRef.current(), 180);
+    return () => clearTimeout(timer);
+  }, [pin]);
 
   return (
     <div className="screen">
@@ -505,9 +519,6 @@ function PinEntry({ prompt, amount, pin, onPin, onSubmit, onCancel }) {
         </button>
       </div>
 
-      <button className="btn btn-primary" disabled={!complete} onClick={onSubmit}>
-        {complete ? `Approve ₹${amount}` : 'Enter four digits'}
-      </button>
       <button className="btn btn-ghost" onClick={onCancel}>
         Cancel
       </button>

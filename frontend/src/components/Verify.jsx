@@ -367,9 +367,27 @@ export function Verify({ merchantId, onDone, onCancel }) {
  */
 function PinStep({ name, pin, onPin, problem, busy, onSubmit, onCancel }) {
   const press = (digit) => {
-    if (pin.length < 4) onPin(pin + digit);
+    if (busy || pin.length >= 4) return;
+    onPin(pin + digit);
   };
-  const complete = pin.length === 4;
+
+  // Submits itself on the fourth digit, the way a phone lock screen and every
+  // UPI app do. There was a button, and on a phone it sat below the keypad and
+  // below the fold -- someone would enter their PIN and find nothing to press.
+  // Removing the step is better than making room for it: nobody expects to
+  // confirm a PIN they have just finished typing.
+  // Held in a ref because the callback is a new function on every parent
+  // render: depending on it directly would clear and rebuild the timer
+  // each time, and a timer that keeps restarting never fires.
+  const submitRef = useRef(onSubmit);
+  submitRef.current = onSubmit;
+
+  useEffect(() => {
+    if (pin.length !== 4 || busy) return undefined;
+    // A beat, so the fourth dot is visibly filled before the screen changes.
+    const timer = setTimeout(() => submitRef.current(), 180);
+    return () => clearTimeout(timer);
+  }, [pin, busy]);
 
   return (
     <div className="screen">
@@ -415,15 +433,8 @@ function PinStep({ name, pin, onPin, problem, busy, onSubmit, onCancel }) {
         </button>
       </div>
 
-      <button
-        className="btn btn-primary"
-        disabled={!complete || busy}
-        onClick={onSubmit}
-      >
-        {busy ? 'Checking…' : complete ? 'Approve' : 'Enter four digits'}
-      </button>
       <button className="btn btn-ghost" disabled={busy} onClick={onCancel}>
-        Cancel
+        {busy ? 'Checking…' : 'Cancel'}
       </button>
     </div>
   );
