@@ -105,6 +105,17 @@ class LivenessSignals:
     elapsed_seconds: float = 0.0
     effective_fps: float | None = None
 
+    # Per-step evidence for look challenges. Session-wide gaze/yaw ranges were
+    # not enough to explain a wrong-direction pass: they say how far the head
+    # moved but not from where, or which way relative to what was asked. These
+    # three make a failed report readable without guessing.
+    #
+    # `baseline_retries` counts windows thrown away for not being still, which
+    # is what tells you a person never settles rather than never moves.
+    baseline_retries: int = 0
+    baselines_locked: list = field(default_factory=list)
+    step_shifts: list = field(default_factory=list)
+
 
 def generate_challenge(steps: int | None = None) -> list[ChallengeStep]:
     """Build a fresh randomised action sequence.
@@ -380,13 +391,37 @@ class LivenessSession:
         """
         if self._baseline is None:
             self._baseline_samples.append((geometry.gaze_horizontal, geometry.head_yaw))
+
+            # A sliding window, not the first N frames. The start of a look step
+            # is the *worst* moment to assume the head is at rest: the previous
+            # step just turned it and it is on its way back. Averaging over a
+            # head in motion records a position it was passing through, and the
+            # remainder of that return then reads as deliberate movement away
+            # from rest — so whichever way the head already happened to be
+            # travelling satisfied the next prompt, whatever the person did.
+            #
+            # Dropping the oldest sample and waiting means the baseline is only
+            # ever taken from a head that has actually stopped.
+            if len(self._baseline_samples) > settings.baseline_frames:
+                self._baseline_samples.pop(0)
+
             if len(self._baseline_samples) < settings.baseline_frames:
                 return False
 
+            gazes = [g for g, _ in self._baseline_samples]
+            yaws = [y for _, y in self._baseline_samples]
+
+            if (
+                max(gazes) - min(gazes) > settings.baseline_stillness
+                or max(yaws) - min(yaws) > settings.baseline_stillness
+            ):
+                self.signals.baseline_retries += 1
+                return False
+
             count = len(self._baseline_samples)
-            self._baseline = (
-                sum(g for g, _ in self._baseline_samples) / count,
-                sum(y for _, y in self._baseline_samples) / count,
+            self._baseline = (sum(gazes) / count, sum(yaws) / count)
+            self.signals.baselines_locked.append(
+                (round(self._baseline[0], 4), round(self._baseline[1], 4))
             )
             return False
 
@@ -425,16 +460,34 @@ class LivenessSession:
         # once the head moves, so it is gated rather than trusted.
         if head_movement >= settings.yaw_still_max:
             satisfied = yaw_shift >= settings.yaw_delta
+            carried_by = "yaw"
         else:
             satisfied = gaze_shift >= settings.gaze_delta
+            carried_by = "gaze"
 
+        # Signed and relative to the locked baseline, which the session-wide
+        # gaze/yaw ranges cannot show. Recorded on the frame that finishes the
+        # step, so a passed step says in one line what actually carried it and
+        # which way the head really went relative to what was asked.
         if not satisfied:
             self._gaze_held_since = None
             return False
 
         if self._gaze_held_since is None:
             self._gaze_held_since = now
-        return (now - self._gaze_held_since) * 1000.0 >= settings.gaze_hold_ms
+
+        held = (now - self._gaze_held_since) * 1000.0 >= settings.gaze_hold_ms
+        if held:
+            self.signals.step_shifts.append(
+                {
+                    "step": self.step_index,
+                    "asked": step.action.value,
+                    "carried_by": carried_by,
+                    "gaze_shift": round(gaze_shift, 4),
+                    "yaw_shift": round(yaw_shift, 4),
+                }
+            )
+        return held
 
     def _begin_next_step(self) -> None:
         self.step_index += 1

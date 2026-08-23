@@ -21,9 +21,18 @@ import { hashPassword } from '../services/merchantAuth.js';
 const [, , name, email, ...rest] = process.argv;
 
 if (!name || !email) {
-  console.error('Usage: node src/scripts/seedMerchant.js "<name>" <email> [--password <pw>]');
+  console.error(
+    'Usage: node src/scripts/seedMerchant.js "<name>" <email> [--password <pw>]\n' +
+      '       node src/scripts/seedMerchant.js "<name>" <email> --reset-password [--password <pw>]',
+  );
   process.exit(1);
 }
+
+// A forgotten password has no other way back. The stored value is a scrypt
+// hash, which cannot be read back by design, and the generated one is printed
+// once and never again — so without this the only route to a terminal you own
+// is deleting the merchant and losing its transaction history with it.
+const reset = rest.includes('--reset-password');
 
 const flagIndex = rest.indexOf('--password');
 const password =
@@ -35,8 +44,28 @@ async function main() {
   await mongoose.connect(config.MONGODB_URI);
 
   const existing = await Merchant.findOne({ email: email.toLowerCase() });
+
+  if (existing && reset) {
+    // Only the password. The merchantId is deliberately left alone — it is
+    // stamped on every transaction and every user's knownMerchants list, so
+    // regenerating it here would orphan the shop's own history.
+    existing.passwordHash = hashPassword(password);
+    existing.active = true;
+    await existing.save();
+
+    console.log(`\nPassword reset for ${existing.name}.\n`);
+    console.log(`  merchantId   ${existing.merchantId}`);
+    console.log(`  email        ${existing.email}`);
+    console.log(`  password     ${password}`);
+    console.log('\nSign in at /till with those.');
+    return;
+  }
+
   if (existing) {
-    console.error(`A merchant already exists for ${email} (${existing.merchantId}).`);
+    console.error(
+      `A merchant already exists for ${email} (${existing.merchantId}).\n` +
+        'Add --reset-password to set a new password for it instead.',
+    );
     process.exitCode = 1;
     return;
   }

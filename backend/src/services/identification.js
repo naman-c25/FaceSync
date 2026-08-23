@@ -152,6 +152,11 @@ export function livenessFields(signals, { passed = true, failureReason = null } 
     earOpenBaseline: signals.ear_open_baseline,
     earThresholdUsed: signals.ear_threshold_used,
     elapsedSeconds: signals.elapsed_seconds,
+    // What actually carried each look step, and which way. A rest window
+    // rejected for not being still counts here too, which separates someone
+    // who never settles from someone who never moves.
+    baselineRetries: signals.baseline_retries ?? 0,
+    stepShifts: signals.step_shifts ?? [],
   };
 }
 

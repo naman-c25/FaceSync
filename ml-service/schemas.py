@@ -146,6 +146,17 @@ class LivenessSignalsModel(BaseModel):
     head_motion_px: float
     elapsed_seconds: float
     challenge: list[str]
+
+    # Per-step evidence for look challenges. The session-wide gaze and yaw
+    # ranges above say how far the head moved, but not from where, nor which
+    # way relative to what was asked -- which is what made a wrong-direction
+    # pass impossible to diagnose from a log and had to be reasoned about
+    # instead. `baseline_retries` counts rest windows rejected for not being
+    # still, so a person who never settles is distinguishable from one who
+    # never moves.
+    baseline_retries: int = 0
+    baselines_locked: list = Field(default_factory=list)
+    step_shifts: list = Field(default_factory=list)
     longest_blink_ms: float = 0.0
     effective_fps: float | None = Field(
         default=None,

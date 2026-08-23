@@ -794,3 +794,65 @@ def test_once_the_head_is_moving_the_eyes_stop_deciding():
     )
 
     assert session.status is LivenessStatus.IN_PROGRESS
+
+
+def moving_frames(start: float, end: float, count: int) -> list[FaceGeometry]:
+    """A head travelling from `start` to `end` yaw, one step per frame."""
+    return [
+        geometry(yaw=start + (end - start) * (i / max(count - 1, 1)))
+        for i in range(count)
+    ]
+
+
+def test_a_baseline_is_not_taken_from_a_head_still_in_motion():
+    """The bug a live kiosk kept hitting after the direction fix.
+
+    A look step begins at the worst possible moment: the previous step just
+    turned the head and it is on its way back to centre. Averaging the first
+    few frames records a position the head was merely *passing through*, and
+    the rest of that return then reads as deliberate movement away from rest.
+
+    So whichever way the head already happened to be travelling satisfied the
+    next prompt, no matter what the person did. Here the head coasts back from
+    a right turn while the prompt asks for left, and nothing else happens --
+    that must not be enough.
+    """
+    session = LivenessSession("coast", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, moving_frames(HEAD_SQUARE - 0.25, HEAD_SQUARE, 30))
+
+    assert session.status is LivenessStatus.IN_PROGRESS
+    assert session.signals.baseline_retries > 0, "the moving window was accepted"
+
+
+def test_the_baseline_locks_once_the_head_settles():
+    """...and the person is not punished for having moved a moment ago."""
+    session = LivenessSession("settle", [ChallengeStep(ActionType.LOOK_LEFT)])
+
+    # Coasting back to centre, then held still, then a real turn to the left.
+    feed(session, moving_frames(HEAD_SQUARE - 0.25, HEAD_SQUARE, 20))
+    feed(session, at_rest(settings.baseline_frames + 2))
+    feed(
+        session,
+        [geometry(yaw=HEAD_SQUARE + settings.yaw_delta + 0.05)] * GAZE_FRAMES,
+    )
+
+    assert session.status is LivenessStatus.PASSED
+
+
+def test_a_passed_look_step_records_which_signal_carried_it():
+    """So the next report is read from evidence rather than reasoned about.
+
+    Session-wide gaze and yaw ranges say how far the head moved but not from
+    where, nor which way relative to what was asked -- which is exactly what
+    was missing while this bug was being chased.
+    """
+    session = LivenessSession("evidence", [ChallengeStep(ActionType.LOOK_LEFT)])
+    feed(session, head_turn_frames(+settings.yaw_delta + 0.05))
+
+    assert session.status is LivenessStatus.PASSED
+    assert len(session.signals.baselines_locked) == 1
+
+    recorded = session.signals.step_shifts[0]
+    assert recorded["asked"] == "look_left"
+    assert recorded["carried_by"] == "yaw"
+    assert recorded["yaw_shift"] > 0

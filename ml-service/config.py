@@ -157,7 +157,28 @@ class Settings(BaseSettings):
     # Frames averaged at the start of a step to establish that rest position.
     # Averaging rather than taking one frame keeps landmark jitter out of the
     # baseline, which would otherwise offset every comparison that follows.
-    baseline_frames: int = 3
+    baseline_frames: int = 5
+
+    # ...and they must be *still* frames. This is the important half, and
+    # leaving it out was a live bug: prompted one way, moving the other way
+    # passed anyway.
+    #
+    # Three frames at 15fps is 200ms, and the moment a look step begins is
+    # exactly when the head is least likely to be at rest — the previous step
+    # just turned it, and it is on its way back. A baseline averaged over a
+    # head in motion records a "rest" position that the head was merely passing
+    # through, and the rest of the return to centre then reads as deliberate
+    # movement. Whichever way the head happened to be travelling satisfied the
+    # next prompt, with no help from the person at all.
+    #
+    # So the window has to settle before it counts. If the head is moving, the
+    # oldest sample is dropped and another taken, until a whole window sits
+    # inside this spread. The step timeout handles someone who never holds
+    # still.
+    #
+    # Sized well under yaw_delta so a baseline can never be locked mid-turn:
+    # a genuine turn moves yaw by 0.28-0.62, hundreds of times this.
+    baseline_stillness: float = 0.02
 
     # Set true only if the frontend sends a horizontally flipped frame.
     # getUserMedia delivers an unmirrored frame and a CSS scaleX(-1) preview

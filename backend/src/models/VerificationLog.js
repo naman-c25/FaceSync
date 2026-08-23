@@ -93,6 +93,14 @@ const verificationLogSchema = new mongoose.Schema(
       earOpenBaseline: { type: Number, default: null },
       earThresholdUsed: { type: Number, default: null },
       elapsedSeconds: { type: Number, default: null },
+      // Per-step evidence for look challenges. The ranges above say how far
+      // the head moved, but not from where, nor which way relative to what was
+      // asked -- which is why a wrong-direction pass could only be reasoned
+      // about, and the reasoning was confidently wrong before it was right.
+      // `baselineRetries` counts rest windows rejected for not being still,
+      // separating someone who never settles from someone who never moves.
+      baselineRetries: { type: Number, default: 0 },
+      stepShifts: { type: mongoose.Schema.Types.Mixed, default: [] },
     },
 
     // Encrypted, and only present on attempts that did not resolve to a user.
