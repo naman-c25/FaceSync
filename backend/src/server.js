@@ -5,7 +5,7 @@ import { config } from './config/index.js';
 
 async function main() {
   await mongoose.connect(config.MONGODB_URI);
-  console.log(`[db] connected to ${config.MONGODB_URI}`);
+  console.log("DB connected successfull");
 
   // Without this the TTL index on sessions is only created lazily, and an
   // abandoned kiosk session would sit in the collection until someone noticed.
