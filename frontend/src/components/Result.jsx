@@ -13,6 +13,14 @@ const OUTCOMES = {
     title: (result) => `Welcome, ${result.user.displayName}`,
     body: 'Identified by face and approved by PIN. You presented nothing — no phone, no card, no name.',
   },
+  // The same match, reached without a PIN because nothing was being paid for.
+  // Saying "approved" here would describe a step that never ran.
+  checked: {
+    icon: '✓',
+    tone: '',
+    title: () => 'Yes — you are registered',
+    body: 'Recognised as this face, with no PIN asked for and no payment started. The scan itself was the real one: same liveness and anti-spoofing checks a payment runs.',
+  },
   // A face that was recognised and then refused at the PIN. Saying "not
   // recognised" here would be wrong twice over: the face *was* recognised, and
   // the person needs to know it was the PIN that stopped them, not the camera.
@@ -36,12 +44,15 @@ const OUTCOMES = {
   },
 };
 
-export function Result({ result, onAgain, onEnrol }) {
+export function Result({ result, checkOnly = false, onAgain, onEnrol, onPay }) {
   // `confirmed` is only absent on outcomes that never reached the PIN at all.
   const refused = result.decision === 'matched' && result.confirmed === false;
+  const checked = checkOnly && result.decision === 'matched';
   const outcome = refused
     ? OUTCOMES.refused
-    : (OUTCOMES[result.decision] ?? OUTCOMES.no_match);
+    : checked
+      ? OUTCOMES.checked
+      : (OUTCOMES[result.decision] ?? OUTCOMES.no_match);
   // Destructuring this directly would throw when a path reaches here without
   // it, and a thrown render is a blank screen with nothing to read -- which is
   // a worse failure than a missing number.
@@ -52,6 +63,11 @@ export function Result({ result, onAgain, onEnrol }) {
       <div className="card verdict">
         <div className={`badge ${outcome.tone}`}>{outcome.icon}</div>
         <h2>{outcome.title(result)}</h2>
+        {checked && (
+          <p className="muted">
+            Registered as <strong>{result.user.displayName}</strong>.
+          </p>
+        )}
         <p className="muted">{outcome.body}</p>
         {refused && result.reason && (
           <p className="muted">{result.reason}</p>
@@ -83,9 +99,18 @@ export function Result({ result, onAgain, onEnrol }) {
       )}
 
       <div className="stack">
-        <button className="btn btn-primary" onClick={onAgain}>
-          Try again
-        </button>
+        {/* Somebody who has just confirmed they are registered is one step from
+            paying, so that is the button they get rather than a second copy of
+            the check they already ran. */}
+        {checked && onPay ? (
+          <button className="btn btn-primary" onClick={onPay}>
+            Pay with my face
+          </button>
+        ) : (
+          <button className="btn btn-primary" onClick={onAgain}>
+            Try again
+          </button>
+        )}
         {result.decision !== 'matched' && (
           <button className="btn btn-secondary" onClick={onEnrol}>
             Register my face

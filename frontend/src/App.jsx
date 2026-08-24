@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { Consent } from './components/Consent.jsx';
 import { Enroll } from './components/Enroll.jsx';
+import { Landing } from './components/Landing.jsx';
 import { Result } from './components/Result.jsx';
 import { Verify } from './components/Verify.jsx';
 
@@ -21,6 +22,19 @@ export default function App() {
   });
 
   const [screen, setScreen] = useState('home');
+  // Where to go once consent is given. Consent used to be the first screen a
+  // visitor saw, which made it a formality -- a checkbox about biometric data
+  // shown to someone who had not yet been told what the project was. It now
+  // appears at the point the camera is actually needed, and this remembers
+  // what they were trying to do when it interrupted them.
+  const [pending, setPending] = useState(null);
+  // Whether this run stops at identification. "Check registration" and
+  // "pay" are the same camera flow up to the moment a name comes back --
+  // same session, same liveness, same anti-spoofing, same 1:N match -- and
+  // differ only in whether a PIN is then asked for. Running them as one
+  // flow with a flag means the check exercises the real path rather than a
+  // lookalike of it.
+  const [checkOnly, setCheckOnly] = useState(false);
   const [result, setResult] = useState(null);
   const [enrolled, setEnrolled] = useState(null);
   const [health, setHealth] = useState(null);
@@ -40,17 +54,33 @@ export default function App() {
       // again next visit.
     }
     setConsented(true);
+    setScreen(pending ?? 'home');
+    setPending(null);
+  };
+
+  // Every route to a camera goes through here, so there is exactly one place
+  // that can be wrong about whether consent was given.
+  const start = (target, options = {}) => {
+    setCheckOnly(Boolean(options.checkOnly));
+    if (consented) {
+      setScreen(target);
+      return;
+    }
+    setPending(target);
+    setScreen('consent');
   };
 
   const home = () => {
     setResult(null);
     setEnrolled(null);
+    setPending(null);
+    setCheckOnly(false);
     setScreen('home');
   };
 
   let body;
 
-  if (!consented) {
+  if (screen === 'consent') {
     body = <Consent onAccept={accept} />;
   } else if (screen === 'enroll') {
     body = (
@@ -66,6 +96,7 @@ export default function App() {
     body = (
       <Verify
         merchantId={MERCHANT_ID}
+        checkOnly={checkOnly}
         onCancel={home}
         onDone={(matched) => {
           setResult(matched);
@@ -77,7 +108,9 @@ export default function App() {
     body = (
       <Result
         result={result}
+        checkOnly={checkOnly}
         onAgain={() => setScreen('verify')}
+        onPay={() => start('verify')}
         onEnrol={() => setScreen('enroll')}
       />
     );
@@ -143,78 +176,37 @@ export default function App() {
     const offline = health?.down || health?.mlService?.reachable === false;
 
     body = (
-      <div className="screen">
-        <div className="stack">
-          <h1>Ready when you are</h1>
-          <p className="lede">
-            Register once, then walk up and pay. Your face says who you are;
-            a PIN says yes. You never identify yourself first.
-          </p>
-        </div>
-
-        {offline && (
-          <p className="note bad">
-            The recognition service is not responding. Nothing will work until
-            it is back up.
-          </p>
-        )}
-
-        <div className="stack">
-          <button
-            className="btn btn-primary"
-            disabled={offline}
-            onClick={() => setScreen('verify')}
-          >
-            Pay with my face
-          </button>
-          <button
-            className="btn btn-secondary"
-            disabled={offline}
-            onClick={() => setScreen('enroll')}
-          >
-            Register my face
-          </button>
-        </div>
-
-        <p className="note">
-          First time here? Register first — verification compares you against
-          everyone already enrolled, so there is nothing to match until you are
-          in that list.
-        </p>
-
-        {/* One link can be shared with everyone, and the two audiences part
-            here. Both destinations are separate screens behind their own
-            logins rather than modes of this one — nothing customer-facing
-            should carry code that charges money. */}
-        <div className="split-links">
-          <a className="btn btn-ghost" href="/account">
-            See my payments
-          </a>
-          <a className="btn btn-ghost" href="/till">
-            I'm a merchant
-          </a>
-        </div>
-      </div>
+      <Landing
+        offline={offline}
+        onCheck={() => start('verify', { checkOnly: true })}
+        onPay={() => start('verify')}
+        onRegister={() => start('enroll')}
+      />
     );
   }
 
   return (
-    <div className="app">
-      <header className="masthead">
-        <div className="wordmark">
-          <span className="dot" />
-          FaceSync
-        </div>
-        {consented && screen !== 'home' && (
+    <div className={`app${screen === 'home' ? ' app-wide' : ''}`}>
+      {/* Kiosk chrome only. The landing page carries its own navbar and
+          footer, and rendering these above it would be a second, smaller copy
+          of both. */}
+      {screen !== 'home' && (
+        <header className="masthead">
+          <div className="wordmark">
+            <span className="dot" />
+            FaceSync
+          </div>
           <button className="link-button" onClick={home}>
             Start over
           </button>
-        )}
-      </header>
+        </header>
+      )}
 
       {body}
 
-      <footer>Prototype — Razorpay hackathon. Not a real payment system.</footer>
+      {screen !== 'home' && (
+        <footer>Prototype — Razorpay hackathon. Not a real payment system.</footer>
+      )}
     </div>
   );
 }

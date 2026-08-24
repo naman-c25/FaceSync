@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, explain } from '../api.js';
+import { deviceId } from '../deviceId.js';
 import { CameraStage } from '../components/CameraStage.jsx';
 import { useCamera } from '../useCamera.js';
 import { merchantApi } from './api.js';
@@ -48,7 +49,7 @@ export function Till({ merchant, onSignOut }) {
     try {
       const started = await api.startVerification({
         merchantId: merchant.merchantId,
-        deviceId: 'till',
+        deviceId: deviceId('till'),
         region: merchant.region,
       });
       sessionRef.current = started;

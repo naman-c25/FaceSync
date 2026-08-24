@@ -37,9 +37,25 @@ const verificationLogSchema = new mongoose.Schema(
         'ambiguous',
         'liveness_failed',
         'capture_failed',
+        // A face that was recognised and then refused at the PIN. Its own
+        // outcome rather than a flag on the matched row, because velocity
+        // rules count rows in a window and a brute-force attempt is several
+        // attempts against one identification -- which only shows up as
+        // several rows.
+        'pin_failed',
         'error',
       ],
       index: true,
+    },
+
+    // How the PIN step ended, on the rows that reached it. Null everywhere
+    // else. Kept because a wrong PIN was, until this existed, completely
+    // invisible: the identification was logged and the refusal was not, so the
+    // audit trail showed a successful match and then silence.
+    pinOutcome: {
+      type: String,
+      enum: ['wrong_pin', 'locked', 'no_pin_set', null],
+      default: null,
     },
 
     matchedUser: {
@@ -165,6 +181,10 @@ const verificationLogSchema = new mongoose.Schema(
 verificationLogSchema.index({ merchantId: 1, createdAt: -1 });
 verificationLogSchema.index({ matchedUser: 1, createdAt: -1 });
 verificationLogSchema.index({ outcome: 1, createdAt: -1 });
+// Every fraud rule asks the same question -- what else happened at this
+// terminal in the last few minutes -- and without this it is a collection scan
+// on the hot path of every log write.
+verificationLogSchema.index({ deviceId: 1, createdAt: -1 });
 
 export const VerificationLog = mongoose.model(
   'VerificationLog',

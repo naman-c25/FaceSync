@@ -5,6 +5,7 @@ import { User } from '../models/User.js';
 import { checkPinAttempt } from '../services/pin.js';
 import { Session } from '../models/Session.js';
 import { VerificationLog } from '../models/VerificationLog.js';
+import { evaluate } from '../services/fraudRuleEngine.js';
 import {
   identifyFromSession,
   livenessFields,
@@ -59,7 +60,7 @@ async function loadSession(sessionId) {
  * would omit exactly the data Phase 4 needs.
  */
 async function writeLog(session, fields) {
-  return VerificationLog.create({
+  const log = await VerificationLog.create({
     sessionId: String(session._id),
     attemptNumber: session.attempts,
     merchantId: session.merchantId,
@@ -68,6 +69,13 @@ async function writeLog(session, fields) {
     challenge: session.challenge,
     ...fields,
   });
+
+  // Checked here rather than on a schedule: the trigger for a fraud rule is
+  // "a row was just written", and this is where that happens. `evaluate`
+  // never throws -- a heuristic must not be able to fail a payment.
+  await evaluate(log);
+
+  return log;
 }
 
 export async function startVerification(req, res) {
@@ -264,6 +272,19 @@ export async function confirmPin(req, res) {
       session.completed = true;
       await session.save();
     }
+
+    // Logged as its own row. A refusal used to leave no trace at all, which
+    // meant somebody working through PINs against a face they had already got
+    // recognised produced an audit trail showing one successful match and
+    // nothing else. Success needs no second row -- the matched row and the
+    // transaction record between them already say it completed.
+    await writeLog(session, {
+      outcome: 'pin_failed',
+      pinOutcome: check.outcome,
+      matchedUser: session.identifiedUser,
+      scores: { top: session.matchScore, runnerUp: session.runnerUpScore },
+      gallerySize: session.gallerySize,
+    });
 
     // 200 deliberately: a refused PIN is an outcome, not a failed request, and
     // an error-shaped body would lose the reason the kiosk needs to show.

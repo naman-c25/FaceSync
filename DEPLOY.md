@@ -74,10 +74,27 @@ not close.
 ### Google Cloud Run
 
 Closest to a free lunch that actually works. The free tier is 2M requests,
-360,000 GiB-seconds of memory and 180,000 vCPU-seconds a month. At 2GB that is
-roughly 50 hours of active compute — and since it scales to zero, idle time
-does not count against it. A demo does not come near the limit. A card is
-required, but nothing is charged inside it.
+360,000 GiB-seconds of memory and 180,000 vCPU-seconds a month, and those two
+allowances run out at different times — so the smaller one is the real budget:
+
+| at `--cpu 2 --memory 2Gi` | | |
+|---|---|---|
+| memory | 360,000 ÷ 2 GiB | 50 hours |
+| **vCPU** | **180,000 ÷ 2** | **25 hours** ← binds first |
+
+25 hours of *request processing*, not of being deployed. CPU is allocated only
+while a request is in flight and the service scales to zero, so idle time costs
+nothing. One verification sends 20-30 frames and works out to roughly five
+seconds of compute, which puts the free tier somewhere north of 15,000
+verifications a month. A demo does not come near it.
+
+`--cpu 1` balances the two allowances at 50 hours each and doubles the
+headroom, at the cost of slower frames and a longer cold start. Not worth it
+unless you are actually running low.
+
+Two things here are not free. A card must be on file, though nothing is charged
+inside the tier. And the image is ~3.5GB against Artifact Registry's 0.5GB of
+free storage — a few rupees a month rather than nothing.
 
 ```bash
 # install the gcloud CLI first: cloud.google.com/sdk
@@ -86,6 +103,7 @@ gcloud run deploy facepay \
   --region asia-south1 \
   --memory 2Gi \
   --cpu 2 \
+  --max-instances 1 \
   --timeout 300 \
   --allow-unauthenticated \
   --set-env-vars "PORT=8080" \
@@ -94,6 +112,14 @@ gcloud run deploy facepay \
 
 `asia-south1` is Mumbai — worth picking, since every liveness frame makes a
 round trip and the region is most of that latency.
+
+`--max-instances 1` is not a cost control, and leaving it out breaks the app.
+Liveness sessions live in the Python process's memory (`session_store.py`), not
+in the database. One verification is 20-30 separate requests carrying the same
+session id, so the moment Cloud Run starts a second instance, some of those
+frames land on a container that has never heard of that session. The scan dies
+partway through, intermittently, for no reason the logs make obvious. A single
+instance serves 80 concurrent requests by default — far more than a demo needs.
 
 Store the two secrets first:
 

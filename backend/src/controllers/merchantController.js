@@ -39,6 +39,11 @@ export async function login(req, res) {
       merchantId: merchant.merchantId,
       name: merchant.name,
       region: merchant.region,
+      // So the client knows which screen to open. Not an authorisation check
+      // -- the role that matters is the one signed into the token and read
+      // again from the database; this only saves showing an admin a till they
+      // cannot use, or a merchant a dashboard the API would refuse anyway.
+      role: merchant.role,
     },
   });
 }

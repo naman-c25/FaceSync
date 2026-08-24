@@ -11,6 +11,7 @@ import { hashPassword } from '../services/merchantAuth.js';
  *
  *     node src/scripts/seedMerchant.js "Corner Store" corner@shop.test
  *     node src/scripts/seedMerchant.js "Corner Store" corner@shop.test --password mine
+ *     node src/scripts/seedMerchant.js "Ops" ops@facesync.test --admin
  *
  * There is no self-registration endpoint, on purpose. A merchant terminal can
  * charge a customer's face, so who gets one is an administrative decision, not
@@ -33,6 +34,12 @@ if (!name || !email) {
 // once and never again — so without this the only route to a terminal you own
 // is deleting the merchant and losing its transaction history with it.
 const reset = rest.includes('--reset-password');
+
+// An admin reads the fraud dashboard, which spans every terminal. That is not
+// a merchant with extra permissions -- it is an account that can see other
+// shops' traffic, so it is made here for the same reason merchants are: not
+// something anyone should be able to grant themselves by signing up.
+const role = rest.includes('--admin') ? 'admin' : 'merchant';
 
 const flagIndex = rest.indexOf('--password');
 const password =
@@ -57,7 +64,11 @@ async function main() {
     console.log(`  merchantId   ${existing.merchantId}`);
     console.log(`  email        ${existing.email}`);
     console.log(`  password     ${password}`);
-    console.log('\nSign in at /till with those.');
+    console.log(
+      existing.role === 'admin'
+        ? '\nSign in at /fraud with those.'
+        : '\nSign in at /till with those.',
+    );
     return;
   }
 
@@ -75,7 +86,7 @@ async function main() {
     name,
     email: email.toLowerCase(),
     passwordHash: hashPassword(password),
-    role: 'merchant',
+    role,
   });
 
   console.log(`\nMerchant created.\n`);
@@ -83,6 +94,7 @@ async function main() {
   console.log(`  merchantId   ${merchant.merchantId}`);
   console.log(`  email        ${merchant.email}`);
   console.log(`  password     ${password}`);
+  console.log(`  role         ${merchant.role}`);
   console.log(
     flagIndex >= 0
       ? '\nKeep that password somewhere safe.'

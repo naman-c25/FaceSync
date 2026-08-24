@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { api, explain } from '../api.js';
+import { deviceId } from '../deviceId.js';
 import { createAnnouncer, speech, SPOKEN } from '../speech.js';
 import { useCamera } from '../useCamera.js';
 import { CameraStage } from './CameraStage.jsx';
@@ -32,7 +33,7 @@ const MAX_BATCH = 12;
  * result is silently dropped. That is exactly what went wrong here — the match
  * request completed with a 200 and the answer went nowhere.
  */
-export function Verify({ merchantId, onDone, onCancel }) {
+export function Verify({ merchantId, checkOnly = false, onDone, onCancel }) {
   const [phase, setPhase] = useState('starting');
   const [identified, setIdentified] = useState(null);
   const [pin, setPin] = useState('');
@@ -54,6 +55,11 @@ export function Verify({ merchantId, onDone, onCancel }) {
   const { capture, status: cameraStatus } = camera;
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+  // Read through a ref for the same reason as onDone: the identify effect
+  // depends on `phase` alone, and adding this would restart an in-flight
+  // request the moment the prop identity changed.
+  const checkOnlyRef = useRef(checkOnly);
+  checkOnlyRef.current = checkOnly;
 
   // 1. Open the session.
   useEffect(() => {
@@ -64,7 +70,7 @@ export function Verify({ merchantId, onDone, onCancel }) {
     startedRef.current = true;
 
     api
-      .startVerification({ merchantId, deviceId: 'web-kiosk' })
+      .startVerification({ merchantId, deviceId: deviceId('kiosk') })
       .then((started) => {
         sessionRef.current = started;
         setLiveness({
@@ -155,6 +161,16 @@ export function Verify({ merchantId, onDone, onCancel }) {
           // The name last, so the useful half arrives even if the listener
           // stops attending partway through.
           speech.say(SPOKEN.recognised(result.user.displayName));
+
+          // Somebody asking whether they are registered has been answered the
+          // moment a name comes back. Asking for a PIN after that would be
+          // collecting a secret for a transaction that was never going to
+          // happen.
+          if (checkOnlyRef.current) {
+            onDoneRef.current(result);
+            return;
+          }
+
           setIdentified(result);
           setPin('');
           setPinProblem(null);
