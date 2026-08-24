@@ -176,6 +176,7 @@ export function livenessFields(signals, { passed = true, failureReason = null } 
     spoofModelsUsed: signals.spoof_models_used ?? 0,
     spoofCropScale: signals.spoof_crop_scale ?? null,
     continuityScore: signals.continuity_score ?? null,
+    bestFrameSharpness: signals.best_frame_sharpness ?? null,
   };
 }
 

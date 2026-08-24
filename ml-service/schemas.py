@@ -152,6 +152,11 @@ class LivenessSignalsModel(BaseModel):
     # Similarity between an early frame and a late one. None when the
     # session was too short to hold two distinct moments.
     continuity_score: float | None = None
+    # Laplacian variance of the frame that would have been matched. Reported
+    # because `frame_too_blurry` was undiagnosable without it: the threshold is
+    # 45 and the reading was nowhere, so there was no way to tell a marginal
+    # frame from a hopeless one.
+    best_frame_sharpness: float | None = None
     blinks_detected: int
     ear_min: float | None = None
     ear_max: float | None = None

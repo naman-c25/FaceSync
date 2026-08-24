@@ -146,6 +146,11 @@ const verificationLogSchema = new mongoose.Schema(
       // attempt, since what makes the threshold movable later is a record of
       // what genuine sessions actually score.
       continuityScore: { type: Number, default: null },
+      // Sharpness of the frame that would have been matched, against a
+      // threshold of 45. Without it a `frame_too_blurry` refusal says only
+      // that something was below the line, not how far -- which is the
+      // difference between a threshold to loosen and a camera to move.
+      bestFrameSharpness: { type: Number, default: null },
     },
 
     // Encrypted, and only present on attempts that did not resolve to a user.

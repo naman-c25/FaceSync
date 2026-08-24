@@ -350,13 +350,34 @@ class Settings(BaseSettings):
     # genuinely weaker and the anti-spoof models carry that case.
     continuity_anchor_frames: int = 10
 
-    # Two frames of one person seconds apart, in the same light through the
-    # same lens, are far more alike than that person is to their own enrolled
-    # template from another day -- and those already score 0.87 to 0.89. So
-    # this sits well above the 0.45 match threshold on purpose: a swap drops
-    # into impostor range, around 0.0 to 0.3, and there is nothing in between
-    # for it to hide in.
-    continuity_threshold: float = 0.80
+    # Measured, after the first attempt at this was wrong.
+    #
+    # It was set to 0.80 on the reasoning that two frames of one person seconds
+    # apart must be far more alike than that person is to their own enrolled
+    # template from another day, so "nothing could hide in between". Twenty-eight
+    # real sessions say otherwise:
+    #
+    #   0.844 0.932 0.662 0.950 0.754 0.882 0.807 0.961 0.843 0.744 0.915 0.814
+    #   0.984 0.871 0.938 0.830 0.906 0.730 0.857 0.947 0.931 0.858 0.857 0.863
+    #   0.868 0.891 0.481 0.740
+    #
+    # Every one of those is the same person twice. Six of the twenty-eight fell
+    # under 0.80 -- 21% of genuine users turned away -- because an early frame
+    # catches a head still moving and a late one catches it settled, and that
+    # difference is real.
+    #
+    # 0.40 is chosen against the other end instead. Across 18,000 comparisons
+    # of real users against the benchmark gallery, two different people never
+    # scored above 0.2233. The swap this guards against -- pass with your own
+    # face, then hold up somebody else's -- lands there. So the line sits above
+    # every impostor score measured and below every genuine session measured,
+    # with room on both sides.
+    #
+    # It is also defence in depth rather than the primary control: a substituted
+    # photograph still has to get past anti-spoofing and still has to match an
+    # enrolled identity on both threshold and margin. Erring permissive here
+    # costs far less than turning away one user in five.
+    continuity_threshold: float = 0.40
 
     # Whether a break stops the payment or is only recorded. On, because the
     # gap it closes is the one an attacker would actually use, and every

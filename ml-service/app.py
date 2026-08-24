@@ -568,6 +568,9 @@ def _signals(session: VerificationSession) -> LivenessSignalsModel:
         spoof_models_used=verdict.models_used if verdict else 0,
         spoof_crop_scale=verdict.crop_scale if verdict else None,
         continuity_score=session.continuity_score,
+        best_frame_sharpness=round(session.best_frame_sharpness, 2)
+        if session.best_frame_sharpness
+        else None,
     )
 
 
