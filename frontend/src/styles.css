@@ -1223,6 +1223,14 @@ footer {
   color: var(--brand);
 }
 
+.demo-caption {
+  margin: 0;
+  padding: 10px 15px 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+}
+
 /* The compact stage list under the video: the same flow as the section below,
    kept beside the recording so the panel explains itself before anyone
    presses play. */

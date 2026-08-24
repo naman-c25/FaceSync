@@ -245,16 +245,31 @@ function DemoPanel() {
             </p>
           </div>
         ) : (
+          /* A short loop rather than a player. Controls on five silent
+             seconds are furniture -- there is nothing to seek to and nothing
+             to hear. Muted is also what lets it start on its own: every
+             browser blocks autoplay with sound. */
           <video
             className="demo-video"
             src={DEMO_VIDEO}
-            controls
+            autoPlay
+            loop
+            muted
             playsInline
             preload="metadata"
             onError={() => setVideoFailed(true)}
           />
         )}
       </div>
+
+      {/* Said out loud, because the rest of this page is careful about the
+          difference between what was measured and what is claimed, and a
+          rendered clip sitting in a panel labelled FaceSync would quietly
+          undo that. The proof is the buttons and the numbers, not the film. */}
+      <p className="demo-caption">
+        Illustration — not a recording of the system. The buttons below run the
+        real thing.
+      </p>
 
       <ol className="demo-flow" aria-label="Steps in a payment">
         {FLOW.map((label, index) => (
