@@ -1,10 +1,19 @@
-# FacePay
+# FaceSync
 
 Pay at a shop without a phone, a card, or an app. Walk up, and the camera works
 out who you are.
 
-A prototype for the Razorpay hackathon. Phase 1 — face detection, liveness, and
-1:N identification — is built and tested.
+A prototype for the Razorpay hackathon, and it runs end to end: face detection,
+passive liveness, anti-spoofing, 1:N identification, a four-digit PIN, a
+Razorpay test-mode charge, a printable receipt, and rule-based fraud flagging
+over the audit trail.
+
+Live at **https://facesync-production.up.railway.app** — kiosk at `/`, merchant
+till at `/till`, customer portal at `/account`, fraud review at `/fraud`.
+
+The product is FaceSync. The directories, environment variables and storage
+keys still say FacePay, which is what it was called first; renaming those would
+churn every deployed secret for nothing.
 
 ## Why 1:N is the whole point
 
@@ -29,7 +38,7 @@ It also makes the problem genuinely harder, and the design follows from that:
 ```
 ml-service/   Python — face detection, liveness, embeddings, matching
 backend/      Node — API, MongoDB, encryption, the audit trail
-frontend/     React — the kiosk, mobile-first
+frontend/     React — four entry points, chosen by path
 ```
 
 Each has its own README with the detail. Short version:
@@ -38,7 +47,11 @@ Each has its own README with the detail. Short version:
   records.
 - **backend** owns all of that and calls the ML service with frames, then with
   a candidate pool to match against.
-- **frontend** is the camera and the prompts.
+- **frontend** is four separate apps sharing one stylesheet: the kiosk (`/`),
+  the merchant till (`/till`), the customer portal (`/account`) and fraud
+  review (`/fraud`). They are split by path rather than folded together,
+  because nothing customer-facing should carry code that charges money, and
+  now also nothing should carry code that reads every terminal's traffic.
 
 ## Running the whole thing
 
@@ -152,7 +165,7 @@ Counting those as recognition failures would have reported 0.51% wrong-person
 instead of 0.00%.
 
 **What this does not measure.** LFW is mid-2000s English-language press
-photography, heavily skewed toward white American men, and FacePay is for Indian
+photography, heavily skewed toward white American men, and FaceSync is for Indian
 customers. Error rates vary by demographic group, so a threshold validated here
 is not thereby validated there. It is also a harder test than the real system
 faces — one press photograph enrolled, versus five fused samples in steady light
@@ -332,33 +345,74 @@ Each of these looked like a working system until something specific caught it.
 a tunnel from your own machine (`cloudflared tunnel --url http://localhost:3000`)
 is free and takes two minutes — the Node service serves the built kiosk, so one
 tunnel exposes the whole app on one URL. For something that stays up without a
-laptop, the root `Dockerfile` builds all three into one image; Google Cloud Run
-is the closest thing to a free tier that has enough memory to load the models.
+laptop, the root `Dockerfile` builds all three into one image.
+
+It currently runs on Railway, and two things about that were not obvious:
+
+- **One replica, always.** Liveness sessions live in the Python process's
+  memory, not in the database, and one verification is 20-30 separate requests
+  carrying the same session id. A second replica means some of those frames
+  land on a container that has never heard of that session — the scan dies
+  partway through, intermittently, with nothing useful in the logs.
+- **Cap the inference threads.** In a container, ONNX Runtime and OpenMP read
+  the *host's* core count and start that many threads while the container is
+  limited to one or two vCPU; they then spend more time contending than
+  working. Frames were taking over fifteen seconds each until
+  `OMP_NUM_THREADS=2` and `MKL_NUM_THREADS=2` were set. (An
+  `ONNXRUNTIME_NUM_THREADS` variable is often suggested for this and does
+  nothing — no such variable exists.)
 
 The API and the ML service are deployed together on purpose. Every liveness
 frame travels browser → Node → Python → back, so splitting them across hosts
 adds a network hop to each of the 20-30 frames in one verification, and the
 frame rate is what blink detection depends on.
 
-## Not built yet
+## What each phase turned into
 
-- **Phase 2** — dial PIN and the merchant's spoken random challenge (ASR plus
-  speaker verification). `ambiguous` results are where the second factor earns
-  its place.
-- **Phase 3** — Razorpay test-mode payment wired to the auth result.
-- **Phase 4** — fraud and anomaly detection over `VerificationLog`. The schema
-  is already carrying what it needs, including the probe embedding of failed
-  attempts, which is what makes it possible to spot the same unidentified face
-  across merchants.
+- **Phase 1** — detection, passive liveness, anti-spoofing, 1:N identification.
+- **Phase 2** — a four-digit PIN, with a lockout after three refusals. The
+  spoken challenge that was planned alongside it was **dropped**: voice cloning
+  defeats speaker verification, and unlike the face side there is no mature
+  liveness answer for it (see ASVspoof). Face plus PIN already satisfies a
+  two-factor requirement with one dynamic factor, so the voice layer was an
+  extra rather than a gap.
+- **Phase 3** — Razorpay in test mode, wired to the auth result, producing a
+  transaction record and a printable receipt.
+- **Phase 4** — rule-based flagging over `VerificationLog`, reviewed at
+  `/fraud` behind an admin account. Not a trained model, deliberately: there is
+  no real fraud data to train on, and training on invented fraud would be
+  theatre. `npm run fraud:replay -- --sweep` re-runs every rule over the whole
+  log and prints how often each would fire.
+
+## Not built, and why
+
+- **Speaker verification.** Dropped for the reason above, not deferred.
+- **Two of the four fraud rules.** "Many distinct people at one terminal" and
+  "a spike in ambiguous results" were specified and left unbuilt. Replayed over
+  205 real logs they fire zero times at every threshold tried — there are
+  thirteen enrolled users and not one `ambiguous` outcome in the whole file.
+  Shipping them so the count reads four would be the same dishonesty as the
+  trained-model claim above.
+- **A trained anomaly model.** The same `VerificationLog` rows become labelled
+  training data once there is real volume. That is the upgrade path, not a
+  missing piece.
 
 ## Honest limits
 
-- A high-quality 3D mask with cut-out eyes could satisfy both EAR and gaze.
-  Defending against it needs depth sensing.
+- A well-made 3D mask defeats both liveness modes, and for different reasons:
+  one with cut-out eyes can satisfy the challenge's EAR and gaze checks, and
+  the anti-spoof models behind the passive mode were trained on print and
+  replay rather than on masks. Defending against it needs depth or infrared,
+  which a browser cannot reach.
 - An attacker injecting frames below the camera driver bypasses liveness
   entirely. That needs hardware attestation.
-- Locality narrowing trades recall for speed: someone who established a
-  locality in one city and pays in another falls outside the narrowed pool. A
-  production system answers that with a tiered search — query narrow, widen on
-  a miss.
+- The anti-spoof models are sensitive to the camera they were trained on, by
+  their own authors' admission. On the cameras used here genuine faces score
+  0.572 and above while print and screen attacks top out at 0.482, but a new
+  sensor has to be measured rather than assumed.
 - A session the user simply abandons writes no audit row.
+- The continuity check that confirms the face which finished liveness is the
+  one being recognised was first set at 0.80 similarity and turned away 21% of
+  genuine sessions; it now sits at 0.40, above every impostor score measured
+  and below every genuine session measured. Both numbers are in `config.py`,
+  because a threshold nobody measured is a guess with a decimal point in it.
