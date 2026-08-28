@@ -194,18 +194,47 @@ Measured at N = 2,009 on the live stack:
 ```
 the cosine similarity itself            0.079 ms
 identify() including ranking            2.0   ms
-base64 decode of the gallery           16.9   ms
-fetch + decrypt + ship from MongoDB  1500-2800 ms   <- 5.35MB per payment
 ```
 
-The matching is free. What costs is reading 2,009 encrypted rows out of MongoDB
-and shipping them to the recognition service on every single payment. At 10,000
-enrolled that is roughly 27MB and ten seconds, which is not a payment terminal.
+The matching is free. Everything that hurt was around it, and breaking the
+gallery build into its three stages at N = 2,017 said exactly where:
 
-This is the honest answer to "do we need a vector database". Not for accuracy,
-and not yet: MongoDB is fine to a few hundred. The reason to move is that the
-vectors should live where the search happens instead of crossing the network
-once per transaction.
+```
+Atlas fetch of the encrypted rows       934 ms   <- 5.6MB per payment
+decrypt                                  21 ms
+serialise the payload                     6 ms
+                                     ------------
+                                        961 ms
+```
+
+Ninety-seven per cent of it was one network round trip, repeated on every
+single scan, for data that does not change unless somebody enrols or deletes.
+So the signatures are now held in memory (`services/galleryCache.js`) and the
+query asks for ids instead of ciphertext:
+
+```
+first scan after a restart             1228 ms   <- two queries instead of one
+every scan after that                   104 ms
+```
+
+**858ms off every verification**, and the remaining 104ms is two small Atlas
+round trips for metadata — the active count that decides whether to narrow, and
+the ids themselves. The first scan is slower than it used to be, once per
+process lifetime, which is the price of splitting one query into two.
+
+What the cache deliberately does *not* hold is the pool itself. Narrowing reads
+`lastSeenAt`, `knownMerchants` and `homeRegion`, and all three move as people
+use the system, so membership is still decided on every scan. Only the
+embeddings are cached, and `tests/galleryCache.test.js` asserts the gallery is
+**identical** cold and warm — same users, same order, same bytes — because the
+accuracy figures above were measured against the database path and have to keep
+describing the running system.
+
+This is also the honest answer to "do we need a vector database". Not for
+accuracy and not for speed: the search was never the slow part. Approximate
+search would in fact make things worse here, because the margin rule depends on
+knowing the true runner-up, and an index that misses it reports a wider margin
+than really exists — turning an `ambiguous` into a confident answer.
 
 ### Liveness
 

@@ -4,6 +4,7 @@ import { ApiError } from '../middleware/errorHandler.js';
 import { Transaction } from '../models/Transaction.js';
 import { User } from '../models/User.js';
 import { VerificationLog } from '../models/VerificationLog.js';
+import { evict } from '../services/galleryCache.js';
 import { Merchant } from '../models/Merchant.js';
 import { hashPin, rejectWeakPin, verifyPin } from '../services/pin.js';
 import { hashPassword, issueUserToken, verifyPassword } from '../services/userAuth.js';
@@ -251,6 +252,9 @@ export async function deleteFaceData(req, res) {
   );
 
   await User.deleteOne({ _id: user._id });
+  // Without this the face stays matchable from memory until the TTL, which
+  // would make the deletion this endpoint promises a lie.
+  evict(user._id);
 
   res.json({
     deleted: true,

@@ -5,6 +5,7 @@ import { Session } from '../models/Session.js';
 import { User } from '../models/User.js';
 import { buildCandidatePool } from '../services/candidatePool.js';
 import { encryptEmbedding } from '../services/encryption.js';
+import { evict } from '../services/galleryCache.js';
 import { hashPin, rejectWeakPin } from '../services/pin.js';
 import { mlService } from '../services/mlServiceClient.js';
 import { ApiError } from '../middleware/errorHandler.js';
@@ -183,6 +184,12 @@ export async function finalizeEnrollment(req, res) {
         recoveryDigits: body.recoveryDigits ?? null,
         pinHash: hashPin(body.pin),
       });
+
+  // Both branches above wrote a signature -- a new one or a replacement -- so
+  // whatever the cache holds for this person is now wrong. Evicting rather
+  // than updating keeps one source of truth: the next scan reads it back from
+  // the database exactly as it was stored.
+  evict(user._id);
 
   session.completed = true;
   await session.save();

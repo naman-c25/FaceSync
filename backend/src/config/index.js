@@ -80,6 +80,12 @@ const schema = z.object({
   // is a candidate. A few hundred 512-d dot products is under a millisecond,
   // so narrowing would buy nothing while adding a way to miss a real user.
   CANDIDATE_POOL_NARROW_ABOVE: z.coerce.number().int().positive().default(500),
+
+  // How long a cached face signature may go unchecked. Every path in the
+  // API that changes one invalidates it immediately, so this only covers
+  // edits made from outside this process -- the dedupe and benchmark
+  // scripts -- which otherwise need a restart to take effect.
+  GALLERY_CACHE_TTL_MS: z.coerce.number().int().positive().default(5 * 60 * 1000),
 });
 
 const parsed = schema.safeParse(process.env);
