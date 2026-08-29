@@ -10,7 +10,7 @@ import mongoose from 'mongoose';
  * There is deliberately no phone number or other identifier used to look
  * people up. The system identifies by face alone (1:N), so nothing here needs
  * to link a face to a contact detail, and a field that does not exist cannot
- * leak. `recoveryDigits` is the one exception and is explained below.
+ * leak.
  */
 const userSchema = new mongoose.Schema(
   {
@@ -86,16 +86,6 @@ const userSchema = new mongoose.Schema(
     // moment its PIN is chosen, because choosing it *is* the confirmation.
     pinSealed: { type: Boolean, default: false },
 
-    // Last four digits of a phone number, hashed. Used only to break a tie
-    // when the face match is ambiguous — never to look anyone up, and never
-    // enough on its own to identify. Optional, because the zero-touch path
-    // does not involve it at all.
-    recoveryDigits: {
-      type: String,
-      select: false,
-      default: null,
-    },
-
     status: {
       type: String,
       enum: ['active', 'suspended'],
@@ -137,7 +127,6 @@ const userSchema = new mongoose.Schema(
     toJSON: {
       transform(_doc, ret) {
         delete ret.embedding;
-        delete ret.recoveryDigits;
         delete ret.pinHash;
         delete ret.passwordHash;
         delete ret.__v;

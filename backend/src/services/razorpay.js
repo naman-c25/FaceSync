@@ -81,7 +81,3 @@ export async function createOrder({ amountPaise, merchantId, userId, receipt }) 
     },
   });
 }
-
-export async function fetchOrder(orderId) {
-  return call('GET', `/orders/${orderId}`);
-}

@@ -14,7 +14,6 @@ Two model sets are needed and neither ships with its package:
 
 import sys
 import urllib.request
-from pathlib import Path
 
 from config import BASE_DIR, settings
 

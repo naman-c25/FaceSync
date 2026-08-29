@@ -15,7 +15,6 @@ needs rather than carry it.
 import sys
 import urllib.parse
 import urllib.request
-from pathlib import Path
 
 from pad import MODEL_DIR, MODELS
 

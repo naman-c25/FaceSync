@@ -59,7 +59,6 @@ import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import preprocessing  # noqa: E402
 import recognition  # noqa: E402
 from config import settings  # noqa: E402
 

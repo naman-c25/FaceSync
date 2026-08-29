@@ -33,7 +33,7 @@ const MAX_BATCH = 12;
  * result is silently dropped. That is exactly what went wrong here — the match
  * request completed with a 200 and the answer went nowhere.
  */
-export function Verify({ merchantId, checkOnly = false, onDone, onCancel }) {
+export function Verify({ onDone, onCancel }) {
   const [phase, setPhase] = useState('starting');
   const [identified, setIdentified] = useState(null);
   const [pin, setPin] = useState('');
@@ -55,11 +55,6 @@ export function Verify({ merchantId, checkOnly = false, onDone, onCancel }) {
   const { capture, status: cameraStatus } = camera;
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
-  // Read through a ref for the same reason as onDone: the identify effect
-  // depends on `phase` alone, and adding this would restart an in-flight
-  // request the moment the prop identity changed.
-  const checkOnlyRef = useRef(checkOnly);
-  checkOnlyRef.current = checkOnly;
 
   // 1. Open the session.
   useEffect(() => {
@@ -70,7 +65,7 @@ export function Verify({ merchantId, checkOnly = false, onDone, onCancel }) {
     startedRef.current = true;
 
     api
-      .startVerification({ merchantId, deviceId: deviceId('kiosk') })
+      .startVerification({ deviceId: deviceId('kiosk') })
       .then((started) => {
         sessionRef.current = started;
         setLiveness({
@@ -87,7 +82,9 @@ export function Verify({ merchantId, checkOnly = false, onDone, onCancel }) {
         setError(cause.message);
         setPhase('error');
       });
-  }, [merchantId]);
+    // Once. The session is opened one time per mount, and the guard above
+    // is what makes that true under StrictMode.
+  }, []);
 
   // 2. Stream frames until the challenge settles.
   useEffect(() => {
@@ -161,15 +158,6 @@ export function Verify({ merchantId, checkOnly = false, onDone, onCancel }) {
           // The name last, so the useful half arrives even if the listener
           // stops attending partway through.
           speech.say(SPOKEN.recognised(result.user.displayName));
-
-          // Somebody asking whether they are registered has been answered the
-          // moment a name comes back. Asking for a PIN after that would be
-          // collecting a secret for a transaction that was never going to
-          // happen.
-          if (checkOnlyRef.current) {
-            onDoneRef.current(result);
-            return;
-          }
 
           setIdentified(result);
           setPin('');

@@ -36,11 +36,6 @@ const captureSchema = z.object({
 
 const finalizeSchema = z.object({
   sessionId: z.string().min(1),
-  recoveryDigits: z
-    .string()
-    .regex(/^\d{4}$/, 'recoveryDigits must be exactly 4 digits')
-    .nullish(),
-
   // The knowledge factor, and required. It was optional while enrollment was
   // mostly a way to collect faces for the dataset, but that left people
   // registered and unable to pay — a state with nothing to recommend it in a
@@ -204,7 +199,6 @@ export async function finalizeEnrollment(req, res) {
         enrollment,
         homeRegion: session.region,
         knownMerchants: session.merchantId ? [session.merchantId] : [],
-        recoveryDigits: body.recoveryDigits ?? null,
         pinHash: hashPin(body.pin),
         // Choosing it here *is* the confirmation, so there is nothing to leave
         // open.

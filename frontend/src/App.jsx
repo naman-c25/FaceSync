@@ -8,7 +8,6 @@ import { Result } from './components/Result.jsx';
 import { Verify } from './components/Verify.jsx';
 import { Wordmark } from './components/Wordmark.jsx';
 
-const MERCHANT_ID = import.meta.env.VITE_MERCHANT_ID ?? 'demo-shop';
 const CONSENT_KEY = 'facepay.consent.v1';
 
 export default function App() {
@@ -29,13 +28,6 @@ export default function App() {
   // appears at the point the camera is actually needed, and this remembers
   // what they were trying to do when it interrupted them.
   const [pending, setPending] = useState(null);
-  // Whether this run stops at identification. "Check registration" and
-  // "pay" are the same camera flow up to the moment a name comes back --
-  // same session, same liveness, same anti-spoofing, same 1:N match -- and
-  // differ only in whether a PIN is then asked for. Running them as one
-  // flow with a flag means the check exercises the real path rather than a
-  // lookalike of it.
-  const [checkOnly, setCheckOnly] = useState(false);
   const [result, setResult] = useState(null);
   const [enrolled, setEnrolled] = useState(null);
   const [health, setHealth] = useState(null);
@@ -61,8 +53,7 @@ export default function App() {
 
   // Every route to a camera goes through here, so there is exactly one place
   // that can be wrong about whether consent was given.
-  const start = (target, options = {}) => {
-    setCheckOnly(Boolean(options.checkOnly));
+  const start = (target) => {
     if (consented) {
       setScreen(target);
       return;
@@ -75,7 +66,6 @@ export default function App() {
     setResult(null);
     setEnrolled(null);
     setPending(null);
-    setCheckOnly(false);
     setScreen('home');
   };
 
@@ -96,8 +86,6 @@ export default function App() {
   } else if (screen === 'verify') {
     body = (
       <Verify
-        merchantId={MERCHANT_ID}
-        checkOnly={checkOnly}
         onCancel={home}
         onDone={(matched) => {
           setResult(matched);
@@ -109,9 +97,7 @@ export default function App() {
     body = (
       <Result
         result={result}
-        checkOnly={checkOnly}
         onAgain={() => setScreen('verify')}
-        onPay={() => start('verify')}
         onEnrol={() => setScreen('enroll')}
       />
     );

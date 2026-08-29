@@ -941,15 +941,6 @@ footer {
   background: var(--accent);
 }
 
-.split-links {
-  display: flex;
-  gap: 10px;
-}
-
-.split-links .btn {
-  flex: 1;
-}
-
 /* Deleting face data is irreversible, and the button should not look like the
    one next to it. */
 .btn-danger {

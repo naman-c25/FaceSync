@@ -63,8 +63,10 @@ VITE_API_URL=https://your-backend.example.com npm run build
 # dist/ is what you upload
 ```
 
-`VITE_MERCHANT_ID` sets which merchant the attempts are logged against, if you
-want to tell two demo locations apart in the data.
+Which shop an attempt is logged against is decided by the server, not by the
+page: the kiosk is always booked to `KIOSK_MERCHANT_ID` and a till to whatever
+its token says. A terminal that could name its own shop was how an unapproved
+one used to scan customers anyway.
 
 ### The ML service is the constraint
 
