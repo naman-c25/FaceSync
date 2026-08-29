@@ -2059,3 +2059,16 @@ footer {
   padding: 9px 18px;
   font-size: 14px;
 }
+
+/* The admin door, kept quiet. */
+.foot-admin {
+  color: var(--faint);
+  font-size: 12.5px;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.foot-admin:hover {
+  color: var(--body);
+  border-bottom-color: var(--line-strong);
+}
