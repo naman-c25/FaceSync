@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { speech } from '../speech.js';
 import { userApi, userToken } from './api.js';
+import { Wordmark } from '../components/Wordmark.jsx';
+import { Enroll } from '../components/Enroll.jsx';
+import { SettingRow } from '../components/SettingRow.jsx';
 
 /**
  * The customer's own view of their data, from their own phone.
@@ -37,12 +40,9 @@ export function UserApp() {
   return (
     <div className="app">
       <header className="masthead">
-        <div className="wordmark">
-          <span className="dot" />
-          FaceSync <span className="muted">· account</span>
-        </div>
+        <Wordmark />
         {user && (
-          <button className="link-button" onClick={signOut}>
+          <button className="header-action" onClick={signOut}>
             Sign out
           </button>
         )}
@@ -95,35 +95,70 @@ export function UserApp() {
  * a face — that happens at the kiosk, with a camera, and this screen says so
  * rather than leaving someone hunting for a signup that does not exist.
  */
+/**
+ * Sign in, or sign up.
+ *
+ * Signing up is three screens rather than one long form, and the split is not
+ * cosmetic: the last of them turns on a camera. Asking for a name, an email, a
+ * password, a PIN *and* a face at once would put a camera on screen before
+ * somebody had decided they were doing this, and consent given at that point
+ * is a formality rather than a decision.
+ *
+ * Signing up still finishes by calling `claim` under the covers — enrolling a
+ * face and attaching an email are two operations, and the endpoint that joins
+ * them is the same one a standalone "set up access" screen used to use. That
+ * screen is gone; anybody who registered at a counter without an email signs
+ * up here instead, and the enrollment recognises their existing face and
+ * updates it rather than storing a second copy.
+ */
 function SignIn({ onSignedIn }) {
-  const [mode, setMode] = useState('login');
+  // `/user#signup` is where "Register your face" on the landing page points.
+  // Dropping somebody on the sign-in tab when they just asked to register is a
+  // small thing that reads as the link having gone to the wrong place.
+  const [mode, setMode] = useState(() =>
+    window.location.hash === '#signup' ? 'signup' : 'login',
+  );
+  const [step, setStep] = useState('details');
   const [fields, setFields] = useState({
     email: '',
     password: '',
     displayName: '',
     pin: '',
+    pinAgain: '',
   });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Set when the face turned out to be one the system already knew, which is
+  // worth stopping on rather than sliding past.
+  const [outcome, setOutcome] = useState(null);
 
   const set = (key) => (event) =>
     setFields((current) => ({ ...current, [key]: event.target.value }));
+
+  const setDigits = (key) => (event) =>
+    setFields((current) => ({
+      ...current,
+      [key]: event.target.value.replace(/\D/g, '').slice(0, 4),
+    }));
+
+  const go = (next) => {
+    setMode(next);
+    setStep('details');
+    setError(null);
+    if (window.location.hash) {
+      // Cleared rather than rewritten: the hash is an entry point, not a
+      // record of which tab is open, and a reload should not undo a choice
+      // made since.
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  };
 
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const result =
-        mode === 'login'
-          ? await userApi.login(fields.email.trim(), fields.password)
-          : await userApi.claim({
-              email: fields.email.trim(),
-              password: fields.password,
-              displayName: fields.displayName.trim(),
-              pin: fields.pin,
-            });
-      onSignedIn(result);
+      onSignedIn(await userApi.login(fields.email.trim(), fields.password));
     } catch (cause) {
       setError(cause.message);
     } finally {
@@ -131,55 +166,392 @@ function SignIn({ onSignedIn }) {
     }
   };
 
+  /**
+   * What happens after the camera, which is three different things.
+   *
+   *   new face                    an account is created
+   *   known face, no sign-in yet  this email and password are attached to it
+   *   known face, already claimed nothing is written; sign in instead
+   *
+   * The third used to attempt the claim anyway and fail with "no enrolled face
+   * matches that name and PIN", which reads as though the scan went wrong when
+   * it went perfectly. `hasAccount` comes back from the enrollment, so it can
+   * be said plainly before anything else is tried.
+   */
+  const afterFace = async (enrolled) => {
+    if (enrolled.hasAccount) {
+      setOutcome({
+        kind: 'existing',
+        name: enrolled.displayName,
+      });
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const account = await userApi.claim({
+        email: fields.email.trim(),
+        password: fields.password,
+        // The name on file, not the one just typed. A face that was already
+        // registered keeps the name it was registered under, and claiming
+        // with the other one would simply not match.
+        displayName: enrolled.displayName,
+        pin: fields.pin,
+      });
+
+      // Signed in either way, but a returning face is told it was recognised.
+      // Finding out later that an account already existed under a name you did
+      // not type is a worse surprise than being told now.
+      if (enrolled.updatedExisting) {
+        setOutcome({ kind: 'attached', name: enrolled.displayName, account });
+        return;
+      }
+      onSignedIn(account);
+    } catch (cause) {
+      setError(cause.message);
+      setStep('details');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---- the face was already on file ----
+  if (outcome?.kind === 'existing') {
+    return (
+      <div className="screen">
+        <div className="card verdict">
+          <div className="badge unsure">!</div>
+          <h2>This face already has an account</h2>
+          <p className="muted">
+            It is registered as <strong>{outcome.name}</strong>, with an email
+            and password already set.
+          </p>
+        </div>
+
+        <p className="note">
+          Nothing was changed — not the name, not the PIN, and not the email on
+          the account. Sign in with the address you used the first time.
+        </p>
+
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            setOutcome(null);
+            go('login');
+          }}
+        >
+          Go to sign in
+        </button>
+      </div>
+    );
+  }
+
+  if (outcome?.kind === 'attached') {
+    return (
+      <div className="screen">
+        <div className="card verdict">
+          <div className="badge">✓</div>
+          <h2>Your face was already registered</h2>
+          <p className="muted">
+            It was on file as <strong>{outcome.name}</strong>, from registering
+            at a counter. This email and password are now attached to it, and
+            your PIN is the one you just chose.
+          </p>
+        </div>
+
+        <p className="note">
+          Your existing payments are already in the history below — the record
+          was updated rather than a second one being created.
+        </p>
+
+        <button
+          className="btn btn-primary"
+          onClick={() => onSignedIn(outcome.account)}
+        >
+          Continue
+        </button>
+      </div>
+    );
+  }
+
+  // ---- signing up: the camera step ----
+  if (mode === 'signup' && step === 'face') {
+    return (
+      <Enroll
+        presetName={fields.displayName.trim()}
+        presetPin={fields.pin}
+        onCancel={() => setStep('pin')}
+        onDone={afterFace}
+      />
+    );
+  }
+
+  const pinReady =
+    /^\d{4}$/.test(fields.pin) && fields.pin === fields.pinAgain;
+
+  // ---- signing up: choosing a PIN ----
+  if (mode === 'signup' && step === 'pin') {
+    return (
+      <div className="screen">
+        <div className="stack">
+          <h1>Choose a PIN</h1>
+          <p className="lede">
+            Four digits. Your face says who you are at the counter; this is what
+            approves the payment.
+          </p>
+        </div>
+
+        <form
+          className="card stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setStep('face');
+          }}
+        >
+          <div className="field">
+            <label htmlFor="pin">PIN</label>
+            <input
+              id="pin"
+              type="password"
+              inputMode="numeric"
+              autoComplete="new-password"
+              maxLength={4}
+              value={fields.pin}
+              onChange={setDigits('pin')}
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="pinAgain">PIN again</label>
+            <input
+              id="pinAgain"
+              type="password"
+              inputMode="numeric"
+              autoComplete="new-password"
+              maxLength={4}
+              value={fields.pinAgain}
+              onChange={setDigits('pinAgain')}
+              required
+            />
+          </div>
+
+          {/* Both fields because the input is masked and a typo here is not a
+              wasted signup -- it is being locked out at a till three wrong
+              attempts later with no idea why. */}
+          {fields.pinAgain && !pinReady && (
+            <p className="note warn">Those two do not match yet.</p>
+          )}
+
+          <button className="btn btn-primary" disabled={!pinReady}>
+            Next — scan your face
+          </button>
+        </form>
+
+        <button className="btn btn-ghost" onClick={() => setStep('details')}>
+          Back
+        </button>
+      </div>
+    );
+  }
+
+  // ---- signing up: name, email, password ----
+  if (mode === 'signup') {
+    const detailsReady =
+      fields.displayName.trim().length > 0 &&
+      fields.email.trim().length > 0 &&
+      fields.password.length >= 8;
+
+    return (
+      <div className="screen">
+        <div className="stack">
+          <h1>Create your account</h1>
+          <p className="lede">
+            Four things: who you are, a way to sign in, a PIN, and your face.
+          </p>
+        </div>
+
+        <Tabs mode={mode} onChange={go} />
+
+        <form
+          className="card stack"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setStep('pin');
+          }}
+        >
+          <div className="field">
+            <label htmlFor="displayName">Your name</label>
+            <input
+              id="displayName"
+              value={fields.displayName}
+              onChange={set('displayName')}
+              autoComplete="name"
+              required
+            />
+            <p className="muted">
+              Spoken aloud at the counter when you are recognised, and printed
+              on your receipt.
+            </p>
+          </div>
+          <div className="field">
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              value={fields.email}
+              onChange={set('email')}
+              autoComplete="email"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              value={fields.password}
+              onChange={set('password')}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+            <p className="muted">At least eight characters.</p>
+          </div>
+
+          <button className="btn btn-primary" disabled={!detailsReady}>
+            Next — choose a PIN
+          </button>
+          {error && <p className="note bad">{error}</p>}
+        </form>
+
+        <p className="note">
+          The email and password are only for reading your own records later.
+          Paying never asks for either.
+        </p>
+      </div>
+    );
+  }
+
+  // ---- forgotten the password ----
+  //
+  // Nothing here sends mail, so there is no link to click. The proof is the
+  // one this system already holds: the name narrows and the PIN settles it,
+  // through the same lockout that guards the PIN at a till. Deliberately not
+  // the face -- a face that could take over the account would make the
+  // password decorative.
+  if (mode === 'forgot') {
+    const canReset =
+      fields.email.trim() &&
+      fields.displayName.trim() &&
+      /^\d{4}$/.test(fields.pin) &&
+      fields.password.length >= 8;
+
+    return (
+      <div className="screen">
+        <div className="stack">
+          <h1>Set a new password</h1>
+          <p className="lede">
+            Your PIN proves this account is yours. Three wrong answers and it
+            locks, the same as at a counter.
+          </p>
+        </div>
+
+        <form
+          className="card stack"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setBusy(true);
+            setError(null);
+            try {
+              onSignedIn(
+                await userApi.resetPassword({
+                  email: fields.email.trim(),
+                  displayName: fields.displayName.trim(),
+                  pin: fields.pin,
+                  newPassword: fields.password,
+                }),
+              );
+            } catch (cause) {
+              setError(cause.message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <div className="field">
+            <label htmlFor="fEmail">Email</label>
+            <input
+              id="fEmail"
+              type="email"
+              value={fields.email}
+              onChange={set('email')}
+              autoComplete="username"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="fName">The name you registered with</label>
+            <input
+              id="fName"
+              value={fields.displayName}
+              onChange={set('displayName')}
+              autoComplete="name"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="fPin">Your PIN</label>
+            <input
+              id="fPin"
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={fields.pin}
+              onChange={setDigits('pin')}
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="fPass">New password</label>
+            <input
+              id="fPass"
+              type="password"
+              value={fields.password}
+              onChange={set('password')}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
+            <p className="muted">At least eight characters.</p>
+          </div>
+
+          <button className="btn btn-primary" disabled={!canReset || busy}>
+            {busy ? 'Working…' : 'Set new password'}
+          </button>
+          {error && <p className="note bad">{error}</p>}
+        </form>
+
+        <button className="btn btn-ghost" onClick={() => go('login')}>
+          Back to sign in
+        </button>
+      </div>
+    );
+  }
+
+  // ---- signing in ----
   return (
     <div className="screen">
       <div className="stack">
-        <h1>{mode === 'login' ? 'Your account' : 'Set up access'}</h1>
+        <h1>Your account</h1>
         <p className="lede">
-          {mode === 'login'
-            ? 'See where you have paid, and what is held about you.'
-            : 'Your face is already registered. This adds a way to sign in and read it back.'}
+          See where you have paid, and what is held about you.
         </p>
       </div>
 
-      <form className="card stack" onSubmit={submit}>
-        {mode === 'claim' && (
-          <>
-            <div className="field">
-              <label htmlFor="displayName">The name you registered with</label>
-              <input
-                id="displayName"
-                value={fields.displayName}
-                onChange={set('displayName')}
-                autoComplete="name"
-                required
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="pin">Your PIN</label>
-              <input
-                id="pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={fields.pin}
-                onChange={(event) =>
-                  setFields((c) => ({
-                    ...c,
-                    pin: event.target.value.replace(/\D/g, '').slice(0, 4),
-                  }))
-                }
-                required
-              />
-            </div>
-            <p className="note">
-              The PIN is what proves this face is yours. A name on its own is
-              neither unique nor secret, so it only narrows down which
-              registration is meant.
-            </p>
-          </>
-        )}
+      <Tabs mode={mode} onChange={go} />
 
+      <form className="card stack" onSubmit={submit}>
         <div className="field">
           <label htmlFor="email">Email</label>
           <input
@@ -187,7 +559,7 @@ function SignIn({ onSignedIn }) {
             type="email"
             value={fields.email}
             onChange={set('email')}
-            autoComplete={mode === 'login' ? 'username' : 'email'}
+            autoComplete="username"
             required
           />
         </div>
@@ -198,35 +570,47 @@ function SignIn({ onSignedIn }) {
             type="password"
             value={fields.password}
             onChange={set('password')}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            autoComplete="current-password"
             minLength={8}
             required
           />
         </div>
 
         <button className="btn btn-primary" disabled={busy}>
-          {busy ? 'Working…' : mode === 'login' ? 'Sign in' : 'Set up access'}
+          {busy ? 'Working…' : 'Sign in'}
         </button>
         {error && <p className="note bad">{error}</p>}
+
+        <button type="button" className="linkish" onClick={() => go('forgot')}>
+          Forgotten your password?
+        </button>
       </form>
 
-      <button
-        className="btn btn-ghost"
-        onClick={() => {
-          setMode(mode === 'login' ? 'claim' : 'login');
-          setError(null);
-        }}
-      >
-        {mode === 'login'
-          ? 'First time here? Set up access'
-          : 'I already have an account'}
-      </button>
-
       <p className="note">
-        Paying never needs an account. You can register your face and pay
-        without giving an email at all — this is only for seeing your own
-        records afterwards.
+        Paying never needs an account. You can register your face at a counter
+        and pay without giving an email at all — this is only for seeing your
+        own records afterwards. Signing up here does both at once.
       </p>
+    </div>
+  );
+}
+
+/** Sign in / sign up, the same control the merchant portal uses. */
+function Tabs({ mode, onChange }) {
+  return (
+    <div className="tabs">
+      <button
+        className={`tab${mode === 'login' ? ' active' : ''}`}
+        onClick={() => onChange('login')}
+      >
+        Sign in
+      </button>
+      <button
+        className={`tab${mode === 'signup' ? ' active' : ''}`}
+        onClick={() => onChange('signup')}
+      >
+        Sign up
+      </button>
     </div>
   );
 }
@@ -268,36 +652,52 @@ function Overview() {
     );
   }
 
-  const weak = data.enrollment.meanSimilarity != null && data.enrollment.meanSimilarity < 0.85;
+  const weak =
+    data.enrollment.meanSimilarity != null && data.enrollment.meanSimilarity < 0.85;
 
   return (
     <div className="screen">
-      <div className="card stack">
-        <h2>{data.displayName}</h2>
-        <p className="muted">
-          Registered{' '}
-          {new Date(data.enrolledAt).toLocaleDateString(undefined, {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          })}
-        </p>
+      <div className="profile">
+        <span className="profile-glyph">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="8.5" r="3.8" />
+            <path d="M4.5 20.5a7.5 7.5 0 0 1 15 0" />
+          </svg>
+        </span>
+        <div>
+          <h2>{data.displayName}</h2>
+          <p>
+            Registered{' '}
+            {new Date(data.enrolledAt).toLocaleDateString(undefined, {
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+            })}
+          </p>
+        </div>
       </div>
 
-      <dl className="scores">
+      {/* Two figures, not three. "Second factor: PIN set" was there when a PIN
+          was optional; it is required at registration now, so the row said the
+          same thing for everybody. */}
+      <div className="stats">
         <div>
-          <dt>Payments</dt>
-          <dd>{data.activity.payments}</dd>
+          <strong>{data.activity.payments}</strong>
+          <span>Payments</span>
         </div>
         <div>
-          <dt>Times recognised</dt>
-          <dd>{data.activity.recognitions}</dd>
+          <strong>{data.activity.recognitions}</strong>
+          <span>Times recognised</span>
         </div>
-        <div>
-          <dt>Second factor</dt>
-          <dd>{data.security.hasPin ? 'PIN set' : 'None'}</dd>
-        </div>
-      </dl>
+      </div>
 
       {data.security.pinLocked && (
         <p className="note bad">
@@ -314,6 +714,46 @@ function Overview() {
           light would improve it.
         </p>
       )}
+
+      <section className="panel-block">
+        <div className="block-head">
+          <h3>Payment settings</h3>
+          <p>Where the money comes from, and how much may leave at once.</p>
+        </div>
+
+        <div className="settings">
+          <SettingRow
+            label="Bank account"
+            note="Where payments are drawn from"
+            value="Not linked"
+            soon
+          />
+          <SettingRow
+            label="Per-payment limit"
+            note="The most a single scan can approve"
+            value="Not set"
+            soon
+          />
+          <SettingRow
+            label="Daily limit"
+            note="Across every shop, in one day"
+            value="Not set"
+            soon
+          />
+          <SettingRow
+            label="Email receipts"
+            note="A copy sent after each payment"
+            value="Off"
+            soon
+          />
+        </div>
+
+        <p className="note">
+          None of these are wired up yet, so nothing here is enforced and no
+          account is linked. Payments run in Razorpay test mode — no real money
+          moves either way.
+        </p>
+      </section>
 
       <p className="note">
         You are identified by your face alone — you never give a name or a
@@ -376,24 +816,37 @@ function History() {
 }
 
 function Security() {
+  // Which proof is being offered. Forgetting the PIN used to be a dead end --
+  // it could not be changed, and deleting the record needs it too -- so the
+  // account password is accepted instead. Not the face: a face that could
+  // reset the PIN would leave the PIN protecting nothing.
+  const [proof, setProof] = useState('pin');
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [again, setAgain] = useState('');
   const [state, setState] = useState({ error: null, done: false });
   const [busy, setBusy] = useState(false);
 
+  const byPassword = proof === 'password';
+
   const digits = (setter) => (event) =>
     setter(event.target.value.replace(/\D/g, '').slice(0, 4));
 
   const matches = next === again;
-  const ready = /^\d{4}$/.test(current) && /^\d{4}$/.test(next) && matches;
+  const ready =
+    (byPassword ? current.length >= 8 : /^\d{4}$/.test(current)) &&
+    /^\d{4}$/.test(next) &&
+    matches;
 
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
     setState({ error: null, done: false });
     try {
-      await userApi.changePin(current, next);
+      await userApi.changePin(
+        byPassword ? { currentPassword: current } : { currentPin: current },
+        next,
+      );
       setState({ error: null, done: true });
       setCurrent('');
       setNext('');
@@ -418,9 +871,35 @@ function Security() {
 
       <form className="card stack" onSubmit={submit}>
         <div className="field">
-          <label htmlFor="current">Current PIN</label>
-          <input id="current" type="password" inputMode="numeric" maxLength={4}
-            value={current} onChange={digits(setCurrent)} required />
+          <label htmlFor="current">
+            {byPassword ? 'Your account password' : 'Current PIN'}
+          </label>
+          {byPassword ? (
+            <input
+              id="current"
+              type="password"
+              autoComplete="current-password"
+              value={current}
+              onChange={(event) => setCurrent(event.target.value)}
+              required
+            />
+          ) : (
+            <input id="current" type="password" inputMode="numeric" maxLength={4}
+              value={current} onChange={digits(setCurrent)} required />
+          )}
+          <button
+            type="button"
+            className="linkish"
+            onClick={() => {
+              setProof(byPassword ? 'pin' : 'password');
+              setCurrent('');
+              setState({ error: null, done: false });
+            }}
+          >
+            {byPassword
+              ? 'I remember my PIN'
+              : 'Forgotten your PIN? Use your password instead'}
+          </button>
         </div>
         <div className="field">
           <label htmlFor="next">New PIN</label>

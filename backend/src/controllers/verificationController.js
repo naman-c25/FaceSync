@@ -1,9 +1,11 @@
 import { z } from 'zod';
 
+import { config } from '../config/index.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { User } from '../models/User.js';
 import { checkPinAttempt } from '../services/pin.js';
 import { Session } from '../models/Session.js';
+import { Merchant } from '../models/Merchant.js';
 import { VerificationLog } from '../models/VerificationLog.js';
 import { evaluate } from '../services/fraudRuleEngine.js';
 import {
@@ -16,8 +18,11 @@ import { mlService } from '../services/mlServiceClient.js';
 // `.nullish()`, not `.optional()` — a client with nothing to send for a field
 // sends `null` rather than dropping the key. See the note in
 // enrollmentController for why that is worth accepting.
+// No `merchantId`. Which shop a session belongs to is decided by the server:
+// the kiosk's is a constant and a till's comes from its token. Accepting it
+// from the body is what let an unapproved terminal borrow an approved shop's
+// id and scan customers anyway.
 const startSchema = z.object({
-  merchantId: z.string().trim().min(1).max(80),
   deviceId: z.string().trim().max(80).nullish(),
   region: z.string().trim().max(80).nullish(),
 });
@@ -78,14 +83,30 @@ async function writeLog(session, fields) {
   return log;
 }
 
-export async function startVerification(req, res) {
+/**
+ * Open a scanning session.
+ *
+ * Two entry points reach this, and neither lets the caller say which shop it
+ * is for. The public kiosk (unauthenticated) is always booked to the kiosk's
+ * own id; a till (behind `requireMerchant`) is booked to the shop in its token
+ * and only if that shop has been approved.
+ *
+ * That split is the whole point. When this read `merchantId` from the request
+ * body, the approval check asked the caller which identity to check them
+ * against — an unapproved shop simply sent the kiosk's id instead and scanned
+ * customers anyway, learning the name of anyone who looked at its camera. The
+ * rule the rest of the codebase already follows, in `requireMerchant`: a
+ * merchant id from a request body is a value the caller chose, not an identity.
+ */
+async function openSession(req, res, merchantId) {
   const body = startSchema.parse(req.body);
+
   const mlSession = await mlService.startVerification();
 
   const session = await Session.create({
     kind: 'verification',
     mlSessionId: mlSession.session_id,
-    merchantId: body.merchantId,
+    merchantId,
     deviceId: body.deviceId ?? null,
     region: body.region ?? null,
   });
@@ -95,6 +116,39 @@ export async function startVerification(req, res) {
     prompt: mlSession.prompt,
     totalSteps: mlSession.total_steps,
   });
+}
+
+/** The public kiosk. Always the kiosk's own shop id, whatever was sent. */
+export async function startVerification(req, res) {
+  return openSession(req, res, config.KIOSK_MERCHANT_ID);
+}
+
+/** A till. Behind `requireMerchant`, so the shop comes from the token. */
+export async function startMerchantVerification(req, res) {
+  const shop = await Merchant.findOne({
+    merchantId: req.merchant.merchantId,
+  }).select('verified active');
+
+  if (!shop?.active) {
+    throw new ApiError(401, 'Session is no longer valid', 'invalid_session');
+  }
+
+  // A shop that signed up for itself cannot look at a customer until it has
+  // been approved. Gated here rather than at the charge, because being told a
+  // stranger's name is the thing an unapproved terminal must not be able to
+  // do -- taking money already needs that customer's own PIN.
+  if (!shop.verified) {
+    throw new ApiError(
+      403,
+      'This terminal is waiting to be approved, so it cannot scan yet',
+      'terminal_not_verified',
+    );
+  }
+
+  // From the token rather than the row just read: it is the identity the
+  // request actually authenticated as, and the projection above does not
+  // even include the field.
+  return openSession(req, res, req.merchant.merchantId);
 }
 
 /**

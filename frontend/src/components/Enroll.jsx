@@ -15,11 +15,22 @@ const COUNTDOWN_MS = 2600;
  * is grabbed — which is how you collect the blurred, off-angle samples that
  * make every later match worse.
  */
-export function Enroll({ onDone, onCancel }) {
-  const [phase, setPhase] = useState('name');
-  const [name, setName] = useState('');
-  const [pin, setPin] = useState('');
-  const [pinAgain, setPinAgain] = useState('');
+/**
+ * @param {string} [presetName]  a name already collected elsewhere
+ * @param {string} [presetPin]   a PIN already collected and confirmed elsewhere
+ *
+ * With both supplied the opening form is skipped and the camera starts
+ * straight away. That is how the account portal uses this: it asks for a name,
+ * an email, a password and a PIN on its own screens, and hands the two this
+ * needs rather than asking for either of them twice.
+ */
+export function Enroll({ onDone, onCancel, presetName = '', presetPin = '' }) {
+  const supplied = Boolean(presetName.trim()) && /^\d{4}$/.test(presetPin);
+
+  const [phase, setPhase] = useState(supplied ? 'starting' : 'name');
+  const [name, setName] = useState(presetName);
+  const [pin, setPin] = useState(presetPin);
+  const [pinAgain, setPinAgain] = useState(presetPin);
   const [session, setSession] = useState(null);
   const [collected, setCollected] = useState(0);
   const [rejection, setRejection] = useState(null);
@@ -39,15 +50,33 @@ export function Enroll({ onDone, onCancel }) {
   pinRef.current = pin;
 
   const start = async (event) => {
-    event.preventDefault();
+    // Called from the form's submit and, when the details came from outside,
+    // from the effect below with nothing to prevent.
+    const fromForm = Boolean(event);
+    event?.preventDefault();
     setError(null);
     try {
       setSession(await api.startEnrollment({ displayName: name.trim() }));
       setPhase('capturing');
     } catch (cause) {
       setError(cause.message);
+      // The form renders the message itself. Started from a preset there is no
+      // form on screen, so without this the failure would leave a camera panel
+      // sitting there with nothing to say and no way forward.
+      if (!fromForm) setPhase('failed');
     }
   };
+
+  // Opening the session is the one thing that cannot happen during render,
+  // so a supplied name and PIN get their own effect rather than a call in the
+  // component body.
+  useEffect(() => {
+    if (phase !== 'starting') return;
+    start();
+    // Deliberately once: `start` closes over the name, which does not change
+    // while this phase is active.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // Both fields, because the PIN is now the only thing standing between a
   // recognised face and a payment, and the input is masked. A typo here is not

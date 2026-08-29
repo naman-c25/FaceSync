@@ -92,7 +92,16 @@ export const userApi = {
 
   me: () => call('GET', '/api/user/me'),
   transactions: () => call('GET', '/api/user/transactions'),
-  changePin: (currentPin, newPin) => call('POST', '/api/user/pin', { currentPin, newPin }),
+  // Either proof. The PIN for somebody changing it by choice, the account
+  // password for somebody who has forgotten it -- deliberately not the face,
+  // because a face that could reset the PIN would make the PIN pointless.
+  changePin: (proof, newPin) => call('POST', '/api/user/pin', { ...proof, newPin }),
+
+  resetPassword: (body) =>
+    call('POST', '/api/user/password/reset', body).then((r) => {
+      userToken.set(r.token);
+      return r.user;
+    }),
 
   deleteFaceData: (pin) =>
     call('DELETE', '/api/user/me', { confirm: 'DELETE MY FACE DATA', pin }),

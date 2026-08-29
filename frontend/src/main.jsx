@@ -14,10 +14,15 @@ import './styles.css';
 // that reads every terminal's traffic.
 //
 // The kiosk is the default because it is the one a stranger walks up to.
+//
+// One name per surface. `/till` and `/account` were the first names for two of
+// these and are gone rather than kept as aliases -- two paths reaching the same
+// screen is the kind of thing that reads as a bug the first time somebody
+// notices it, and there is nothing here worth that confusion.
 const path = window.location.pathname;
-const Entry = path.startsWith('/till')
+const Entry = path.startsWith('/merchant')
   ? MerchantApp
-  : path.startsWith('/account')
+  : path.startsWith('/user')
     ? UserApp
     : path.startsWith('/fraud')
       ? FraudApp

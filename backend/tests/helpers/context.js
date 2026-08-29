@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 import { createApp } from '../../src/app.js';
 import { config } from '../../src/config/index.js';
+import * as galleryCache from '../../src/services/galleryCache.js';
 import { createFakeMlService } from './fakeMlService.js';
 
 /**
@@ -65,6 +66,10 @@ export async function createTestContext() {
 
     async reset() {
       ml.reset();
+      // The gallery is held in memory between requests, so wiping the
+      // collections without clearing it leaves one test's face signatures
+      // visible to the next.
+      galleryCache.clear();
       const { collections } = mongoose.connection;
       await Promise.all(
         Object.values(collections).map((collection) => collection.deleteMany({})),

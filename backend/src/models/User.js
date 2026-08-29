@@ -71,6 +71,21 @@ const userSchema = new mongoose.Schema(
     pinFailures: { type: Number, default: 0 },
     pinLockedUntil: { type: Date, default: null },
 
+    // Whether the PIN on this record may still be replaced by showing the face.
+    //
+    // Re-registering used to overwrite the PIN unconditionally, which made a
+    // face on its own enough to remove the second factor the face was supposed
+    // to need: present somebody, choose a new PIN, and what protected them is
+    // gone. Sealing closes that -- a sealed record has to prove its PIN before
+    // anything about it is rewritten.
+    //
+    // Defaults to false rather than true, and only for the records that
+    // existed before this: they were registered when re-enrolling was the way
+    // to set a PIN, so each gets exactly one more use of that route, after
+    // which it seals itself. Everything created from now on is sealed the
+    // moment its PIN is chosen, because choosing it *is* the confirmation.
+    pinSealed: { type: Boolean, default: false },
+
     // Last four digits of a phone number, hashed. Used only to break a tie
     // when the face match is ambiguous — never to look anyone up, and never
     // enough on its own to identify. Optional, because the zero-touch path

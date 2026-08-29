@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 
+import { Merchant } from '../src/models/Merchant.js';
 import { User } from '../src/models/User.js';
 import { VerificationLog } from '../src/models/VerificationLog.js';
 import { buildCandidatePool } from '../src/services/candidatePool.js';
+import { hashPassword } from '../src/services/merchantAuth.js';
 import { createTestContext, FAKE_FRAME } from './helpers/context.js';
 
 let ctx;
@@ -16,6 +18,7 @@ after(async () => {
 });
 beforeEach(async () => {
   await ctx.reset();
+  tokens.clear();
 });
 
 async function enrol({ displayName, merchantId, region } = {}) {
@@ -37,8 +40,43 @@ async function enrol({ displayName, merchantId, region } = {}) {
   return done.body.userId;
 }
 
+/**
+ * A signed-in shop.
+ *
+ * Needed because a scan is booked to the shop in its token now, not to a
+ * merchant id in the request body -- otherwise any caller could name any shop.
+ */
+const tokens = new Map();
+async function shopToken(merchantId) {
+  if (tokens.has(merchantId)) return tokens.get(merchantId);
+
+  const email = `${merchantId}@test.shop`;
+  await Merchant.create({
+    merchantId,
+    name: merchantId,
+    email,
+    passwordHash: hashPassword('a-long-enough-one'),
+  });
+  const { body } = await ctx.request('POST', '/api/merchant/login', {
+    email,
+    password: 'a-long-enough-one',
+  });
+
+  tokens.set(merchantId, body.token);
+  return body.token;
+}
+
 async function identify({ merchantId, region } = {}) {
-  const start = await ctx.request('POST', '/api/verify/start', { merchantId, region });
+  const token = await shopToken(merchantId ?? 'kiosk-shop');
+  const started = await fetch(`${ctx.baseUrl}/api/merchant/verify/start`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ region }),
+  }).then((r) => r.json());
+  const start = { body: started };
 
   ctx.ml.state.livenessOutcome = 'passed';
   await ctx.request('POST', '/api/verify/frame', {

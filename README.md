@@ -9,7 +9,7 @@ Razorpay test-mode charge, a printable receipt, and rule-based fraud flagging
 over the audit trail.
 
 Live at **https://facesync-production.up.railway.app** — kiosk at `/`, merchant
-till at `/till`, customer portal at `/account`, fraud review at `/fraud`.
+till at `/merchant`, customer portal at `/user`, fraud review at `/fraud`.
 
 The product is FaceSync. The directories, environment variables and storage
 keys still say FacePay, which is what it was called first; renaming those would
@@ -48,7 +48,7 @@ Each has its own README with the detail. Short version:
 - **backend** owns all of that and calls the ML service with frames, then with
   a candidate pool to match against.
 - **frontend** is four separate apps sharing one stylesheet: the kiosk (`/`),
-  the merchant till (`/till`), the customer portal (`/account`) and fraud
+  the merchant till (`/merchant`), the customer portal (`/user`) and fraud
   review (`/fraud`). They are split by path rather than folded together,
   because nothing customer-facing should carry code that charges money, and
   now also nothing should carry code that reads every terminal's traffic.
@@ -231,10 +231,46 @@ accuracy figures above were measured against the database path and have to keep
 describing the running system.
 
 This is also the honest answer to "do we need a vector database". Not for
-accuracy and not for speed: the search was never the slow part. Approximate
-search would in fact make things worse here, because the margin rule depends on
-knowing the true runner-up, and an index that misses it reports a wider margin
-than really exists — turning an `ambiguous` into a confident answer.
+accuracy and not for speed: the search was never the slow part.
+
+### Bucketing the gallery, and why it cannot help
+
+The obvious next idea is the one every vector index uses: cluster the gallery
+and only search the promising clusters. Approximate versions of that are off the
+table here — the margin rule needs the true runner-up, and an index that misses
+it reports a *wider* margin than really exists, turning an `ambiguous` into a
+confident wrong name.
+
+So `tools/bucketed_gallery.py` implements the exact version instead. Cluster the
+embeddings, and bound each bucket by the triangle inequality: nothing inside a
+bucket can score higher than `centre · probe + radius`. Visit buckets in
+descending order of that ceiling and stop when it drops below the fifth-best
+score found so far — provably safe, because a bucket is only skipped once it
+*cannot* contain a better answer.
+
+It works, and it is useless. `tools/bucket_check.py`, over the 5,486 real
+embeddings in `benchmark-data/`:
+
+```
+                   compared        time      vs full scan
+N = 2,017     2,017 of 2,017     0.251 ms      3.6x slower
+N = 5,000     5,000 of 5,000     0.674 ms      7.7x slower
+full scan                   0.070 / 0.088 ms
+```
+
+The top five come back identical on every probe, and **not one bucket was ever
+pruned**. In 512 dimensions a cluster of faces has a radius close to the √2 that
+separates two arbitrary unit vectors, while `centre · probe` spans a much
+narrower range — so every ceiling sits above every achievable score and the
+skip test never fires. That is the curse of dimensionality, not a tuning
+problem, and it is exactly why production indexes are approximate: exact metric
+pruning does not work at this width.
+
+Which settles it. You may have exact answers or you may have pruning; at 512
+dimensions you cannot have both, and the margin rule makes exact
+non-negotiable. Once pruning is gone, `matrix @ probe` is already the best
+available — BLAS goes from 2,017 rows to 5,000 for 1.3x the time, so a hundred
+thousand would still be about two milliseconds.
 
 ### Liveness
 

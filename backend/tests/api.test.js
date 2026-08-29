@@ -726,8 +726,14 @@ describe('a PIN is required to register', () => {
   it('gives a returning face the PIN it never had', async () => {
     // The way back for everyone who enrolled while it was optional: register
     // again, and the existing record is updated rather than duplicated.
+    //
+    // `pinSealed: false` is what those records look like -- they predate
+    // sealing, so each has one remaining use of this route before it closes.
     const first = await enrol({ displayName: 'Returning' });
-    await User.updateOne({ _id: first }, { $set: { pinHash: null } });
+    await User.updateOne(
+      { _id: first },
+      { $set: { pinHash: null, pinSealed: false } },
+    );
 
     ctx.ml.state.duplicateScore = 0.91;
     const sessionId = await readyToFinalize('Returning');
@@ -742,6 +748,7 @@ describe('a PIN is required to register', () => {
 
     const stored = await User.findById(first).select('+pinHash').lean();
     assert.ok(stored.pinHash, 'the returning face still has no PIN');
+    assert.equal(stored.pinSealed, true, 'and the route should now be closed');
     assert.equal(await User.countDocuments(), 1);
   });
 
@@ -751,7 +758,13 @@ describe('a PIN is required to register', () => {
     const first = await enrol({ displayName: 'Locked Out' });
     await User.updateOne(
       { _id: first },
-      { $set: { pinFailures: 3, pinLockedUntil: new Date(Date.now() + 900000) } },
+      {
+        $set: {
+          pinFailures: 3,
+          pinLockedUntil: new Date(Date.now() + 900000),
+          pinSealed: false,
+        },
+      },
     );
 
     ctx.ml.state.duplicateScore = 0.91;

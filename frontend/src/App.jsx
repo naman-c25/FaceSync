@@ -6,6 +6,7 @@ import { Enroll } from './components/Enroll.jsx';
 import { Landing } from './components/Landing.jsx';
 import { Result } from './components/Result.jsx';
 import { Verify } from './components/Verify.jsx';
+import { Wordmark } from './components/Wordmark.jsx';
 
 const MERCHANT_ID = import.meta.env.VITE_MERCHANT_ID ?? 'demo-shop';
 const CONSENT_KEY = 'facepay.consent.v1';
@@ -178,9 +179,7 @@ export default function App() {
     body = (
       <Landing
         offline={offline}
-        onCheck={() => start('verify', { checkOnly: true })}
         onPay={() => start('verify')}
-        onRegister={() => start('enroll')}
       />
     );
   }
@@ -192,10 +191,7 @@ export default function App() {
           of both. */}
       {screen !== 'home' && (
         <header className="masthead">
-          <div className="wordmark">
-            <span className="dot" />
-            FaceSync
-          </div>
+          <Wordmark />
           <button className="link-button" onClick={home}>
             Start over
           </button>

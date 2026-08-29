@@ -47,8 +47,7 @@ export function Till({ merchant, onSignOut }) {
     setOutcome(null);
 
     try {
-      const started = await api.startVerification({
-        merchantId: merchant.merchantId,
+      const started = await merchantApi.startVerification({
         deviceId: deviceId('till'),
         region: merchant.region,
       });

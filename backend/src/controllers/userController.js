@@ -6,7 +6,12 @@ import { User } from '../models/User.js';
 import { VerificationLog } from '../models/VerificationLog.js';
 import { evict } from '../services/galleryCache.js';
 import { Merchant } from '../models/Merchant.js';
-import { hashPin, rejectWeakPin, verifyPin } from '../services/pin.js';
+import {
+  checkPinAttempt,
+  hashPin,
+  rejectWeakPin,
+  verifyPin,
+} from '../services/pin.js';
 import { hashPassword, issueUserToken, verifyPassword } from '../services/userAuth.js';
 
 const credentials = z.object({
@@ -180,10 +185,84 @@ export async function history(req, res) {
   });
 }
 
-const pinChange = z.object({
-  currentPin: z.string().regex(/^\d{4}$/),
-  newPin: z.string().regex(/^\d{4}$/),
+// Either proof is accepted, and neither is the face.
+//
+// The old PIN, for somebody who simply wants a different one. The account
+// password, for somebody who has forgotten it -- they are already signed in,
+// so re-entering it is a confirmation rather than a new fact, and there was
+// otherwise no way back at all: a forgotten PIN could not be changed, and
+// deleting your face data needs the PIN too.
+//
+// Deliberately not the face. Letting a face reset the PIN is exactly the hole
+// that sealing closed: the PIN exists so that a face on its own is not enough.
+const pinChange = z
+  .object({
+    currentPin: z.string().regex(/^\d{4}$/).optional(),
+    currentPassword: z.string().min(1).optional(),
+    newPin: z.string().regex(/^\d{4}$/),
+  })
+  .refine((body) => body.currentPin || body.currentPassword, {
+    message: 'Give either your current PIN or your password',
+  });
+
+const passwordReset = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  // The name narrows; the PIN proves. The same pairing the account was set up
+  // with, and the same reason: a name is neither unique nor secret.
+  displayName: z.string().trim().min(1).max(120),
+  pin: z.string().regex(/^\d{4}$/),
+  newPassword: z.string().min(8).max(200),
 });
+
+/**
+ * Set a new password without being signed in.
+ *
+ * There is no email to send a link to -- nothing here sends mail -- so the
+ * proof is the one this system already has: the PIN, checked through the same
+ * lockout that guards it at a till. Three wrong answers and it stops, which is
+ * what keeps four digits from being guessable.
+ *
+ * Failures are deliberately identical whether the email is unknown, the name
+ * is wrong, or the PIN is wrong. Otherwise this becomes a way to find out
+ * which addresses are registered and then to test names against them.
+ */
+export async function resetPassword(req, res) {
+  const body = passwordReset.parse(req.body);
+
+  const user = await User.findOne({ email: body.email }).select('+pinHash');
+  const refuse = () => {
+    throw new ApiError(
+      401,
+      'That name and PIN do not match this account',
+      'reset_failed',
+    );
+  };
+
+  if (!user || user.status !== 'active' || user.displayName !== body.displayName) {
+    return refuse();
+  }
+
+  // The shared lockout, so this route cannot be used to brute-force a PIN that
+  // the payment path would have locked after three tries.
+  const check = await checkPinAttempt(user, body.pin);
+  if (!check.ok) {
+    if (check.outcome === 'locked') {
+      throw new ApiError(423, check.reason, 'pin_locked');
+    }
+    return refuse();
+  }
+
+  user.passwordHash = hashPassword(body.newPassword);
+  await user.save();
+
+  // Signed in on the way out. They have just proved more than the sign-in form
+  // asks for, and sending them back to it to type the password they set one
+  // second ago is friction with nothing behind it.
+  return res.json({
+    token: issueUserToken(user),
+    user: { userId: String(user._id), displayName: user.displayName },
+  });
+}
 
 /** Change the PIN, proving the old one first. */
 export async function changePin(req, res) {
@@ -192,11 +271,25 @@ export async function changePin(req, res) {
   const weak = rejectWeakPin(body.newPin);
   if (weak) throw new ApiError(400, weak, 'weak_pin');
 
-  const user = await User.findById(req.user.id).select('+pinHash');
+  const user = await User.findById(req.user.id).select('+pinHash +passwordHash');
   if (!user?.pinHash) throw new ApiError(404, 'No PIN is set', 'no_pin_set');
 
-  if (!verifyPin(body.currentPin, user.pinHash)) {
-    throw new ApiError(401, 'That is not your current PIN', 'wrong_pin');
+  // Whichever proof was offered. The password route exists so that forgetting
+  // the PIN is recoverable at all -- before it, a forgotten PIN could not be
+  // changed and could not even be used to delete the record, which needs it.
+  const proved = body.currentPin
+    ? verifyPin(body.currentPin, user.pinHash)
+    : Boolean(user.passwordHash) &&
+      verifyPassword(body.currentPassword, user.passwordHash);
+
+  if (!proved) {
+    throw new ApiError(
+      401,
+      body.currentPin
+        ? 'That is not your current PIN'
+        : 'That is not your password',
+      'wrong_credential',
+    );
   }
 
   user.pinHash = hashPin(body.newPin);

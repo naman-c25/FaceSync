@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { fraudApi } from './api.js';
+import { Wordmark } from '../components/Wordmark.jsx';
 
 /**
  * The review screen for flagged patterns.
@@ -221,6 +222,73 @@ function Evidence({ id, onBack, onReviewed }) {
   );
 }
 
+/**
+ * Shops that have signed up and cannot scan yet.
+ *
+ * Sits above the flags because it is the one thing on this screen somebody is
+ * waiting on: an unapproved terminal is a shop that cannot take a payment,
+ * and until this existed the only way to release one was a command line.
+ */
+function PendingMerchants() {
+  const [merchants, setMerchants] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [problem, setProblem] = useState(null);
+
+  const load = useCallback(() => {
+    fraudApi
+      .pendingMerchants()
+      .then((data) => setMerchants(data.merchants))
+      .catch((cause) => setProblem(cause.message));
+  }, []);
+
+  useEffect(load, [load]);
+
+  const approve = async (id) => {
+    setBusy(id);
+    setProblem(null);
+    try {
+      await fraudApi.approveMerchant(id);
+      setMerchants((current) => current.filter((m) => m.id !== id));
+    } catch (cause) {
+      setProblem(cause.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (problem) return <p className="note bad">{problem}</p>;
+  if (!merchants || merchants.length === 0) return null;
+
+  return (
+    <div className="stack">
+      <h2>Waiting for approval</h2>
+      <div className="ledger">
+        {merchants.map((m) => (
+          <div className="ledger-row" key={m.id}>
+            <div>
+              <strong>{m.name}</strong>
+              <span className="muted">
+                {m.email} · <span className="mono">{m.merchantId}</span>
+              </span>
+            </div>
+            <button
+              className="btn btn-primary approve"
+              disabled={busy === m.id}
+              onClick={() => approve(m.id)}
+            >
+              {busy === m.id ? 'Approving…' : 'Approve'}
+            </button>
+          </div>
+        ))}
+      </div>
+      <p className="note">
+        Approving lets that shop&apos;s terminal scan customers. Until then it
+        can sign in and see its own empty ledger, and nothing else.
+      </p>
+    </div>
+  );
+}
+
 function Flags({ onOpen }) {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState('open');
@@ -240,6 +308,8 @@ function Flags({ onOpen }) {
 
   return (
     <div className="stack">
+      <PendingMerchants />
+
       <div className="tabs">
         {['open', 'confirmed', 'cleared', 'all'].map((value) => (
           <button
@@ -325,10 +395,7 @@ export function FraudApp() {
   return (
     <div className="app">
       <header className="masthead">
-        <div className="wordmark">
-          <span className="dot" />
-          FaceSync · fraud review
-        </div>
+        <Wordmark />
         {signedIn && (
           <button className="link-button" onClick={signOut}>
             Sign out

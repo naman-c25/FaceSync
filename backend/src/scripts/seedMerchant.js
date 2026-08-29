@@ -12,6 +12,7 @@ import { hashPassword } from '../services/merchantAuth.js';
  *     node src/scripts/seedMerchant.js "Corner Store" corner@shop.test
  *     node src/scripts/seedMerchant.js "Corner Store" corner@shop.test --password mine
  *     node src/scripts/seedMerchant.js "Ops" ops@facesync.test --admin
+ *     node src/scripts/seedMerchant.js --verify shop@newshop.test
  *
  * There is no self-registration endpoint, on purpose. A merchant terminal can
  * charge a customer's face, so who gets one is an administrative decision, not
@@ -20,6 +21,46 @@ import { hashPassword } from '../services/merchantAuth.js';
  * hand a terminal to whoever registered that address.
  */
 const [, , name, email, ...rest] = process.argv;
+
+// Approving a shop that signed itself up. Its own flag rather than part of the
+// create path, because approval is the administrative act -- the account
+// already exists and only the camera is being unlocked.
+if (name === '--verify') {
+  const target = email;
+  if (!target) {
+    console.error('Usage: node src/scripts/seedMerchant.js --verify <email>');
+    process.exit(1);
+  }
+
+  const { Merchant: M } = await import('../models/Merchant.js');
+  const m = (await import('mongoose')).default;
+  const { config: c } = await import('../config/index.js');
+
+  await m.connect(c.MONGODB_URI);
+  const shop = await M.findOne({ email: target.toLowerCase() });
+
+  if (!shop) {
+    console.error(`
+No merchant with the email ${target}.`);
+    process.exitCode = 1;
+  } else if (shop.verified) {
+    console.log(`
+${shop.name} (${shop.merchantId}) was already approved.`);
+  } else {
+    shop.verified = true;
+    await shop.save();
+    console.log(`
+Approved ${shop.name}.
+`);
+    console.log(`  merchantId   ${shop.merchantId}`);
+    console.log(`  email        ${shop.email}`);
+    console.log('
+Its terminal can scan customers from now on.');
+  }
+
+  await m.disconnect();
+  process.exit(process.exitCode ?? 0);
+}
 
 if (!name || !email) {
   console.error(
@@ -67,7 +108,7 @@ async function main() {
     console.log(
       existing.role === 'admin'
         ? '\nSign in at /fraud with those.'
-        : '\nSign in at /till with those.',
+        : '\nSign in at /merchant with those.',
     );
     return;
   }

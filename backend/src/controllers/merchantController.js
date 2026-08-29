@@ -1,19 +1,86 @@
+import { randomBytes } from 'node:crypto';
+
 import { z } from 'zod';
 
 import { ApiError } from '../middleware/errorHandler.js';
 import { Merchant } from '../models/Merchant.js';
 import { Transaction } from '../models/Transaction.js';
 import { User } from '../models/User.js';
-import { issueToken, verifyPassword } from '../services/merchantAuth.js';
+import {
+  hashPassword,
+  issueToken,
+  verifyPassword,
+} from '../services/merchantAuth.js';
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
 });
 
+const registerSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().toLowerCase().email(),
+  // Long rather than complicated. A shop password guards a terminal that can
+  // charge people, and length is the only rule that reliably buys anything.
+  password: z.string().min(10).max(200),
+});
+
 const historySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
+
+/**
+ * Open a shop account.
+ *
+ * Anyone may do this, and it grants nothing on its own. The new account can
+ * sign in and look at its own empty ledger; what it cannot do is start a
+ * verification, because `verified` is false until somebody approves it.
+ *
+ * That split is the point. Charging already needs the customer's PIN, so the
+ * risk in a stranger's terminal is not theft — it is that pointing a camera at
+ * a queue and being told everybody's name is a thing you should have to be
+ * trusted with. Approval is an administrative act, exactly as issuing the
+ * whole account used to be; it is only the account creation that moved.
+ */
+export async function register(req, res) {
+  const body = registerSchema.parse(req.body);
+
+  if (await Merchant.exists({ email: body.email })) {
+    // Said plainly. Hiding it would not protect anything -- the sign-in form
+    // next door already tells anyone who asks whether an address is taken --
+    // and leaving somebody guessing why their signup failed is worse.
+    throw new ApiError(409, 'An account already exists for that email', 'email_taken');
+  }
+
+  // A random suffix, always. Deriving the id from the name alone would let the
+  // first person to sign up as "Corner Store" take the id a real Corner Store
+  // would want -- and the id is stamped on every transaction and sits in every
+  // customer's knownMerchants, so it is not a label that can be swapped later.
+  const slug = body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const merchantId = `${slug.slice(0, 28) || 'shop'}-${randomBytes(3).toString('hex')}`;
+
+  const merchant = await Merchant.create({
+    merchantId,
+    name: body.name,
+    email: body.email,
+    passwordHash: hashPassword(body.password),
+    role: 'merchant',
+    verified: false,
+  });
+
+  // Signed in immediately. There is nothing to protect by making them log in
+  // again, and the account cannot do anything until it is approved anyway.
+  res.status(201).json({
+    token: issueToken(merchant),
+    merchant: {
+      merchantId: merchant.merchantId,
+      name: merchant.name,
+      region: merchant.region,
+      role: merchant.role,
+      verified: merchant.verified,
+    },
+  });
+}
 
 export async function login(req, res) {
   const body = loginSchema.parse(req.body);
@@ -44,6 +111,9 @@ export async function login(req, res) {
       // again from the database; this only saves showing an admin a till they
       // cannot use, or a merchant a dashboard the API would refuse anyway.
       role: merchant.role,
+      // So the till can explain itself before the customer is standing there,
+      // rather than failing at the moment somebody looks into the camera.
+      verified: merchant.verified,
     },
   });
 }
@@ -59,6 +129,7 @@ export async function whoami(req, res) {
     merchantId: merchant.merchantId,
     name: merchant.name,
     region: merchant.region,
+    verified: merchant.verified,
   });
 }
 

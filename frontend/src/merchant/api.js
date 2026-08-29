@@ -85,12 +85,27 @@ export const merchantApi = {
     tokenStore.set(result.token);
     return result.merchant;
   },
+  async register(name, email, password) {
+    const result = await request('POST', '/api/merchant/register', {
+      name,
+      email,
+      password,
+    });
+    tokenStore.set(result.token);
+    return result.merchant;
+  },
   logout: () => tokenStore.clear(),
 
   me: () => request('GET', '/api/merchant/me'),
   stats: () => request('GET', '/api/merchant/stats'),
   transactions: (limit = 25) =>
     request('GET', `/api/merchant/transactions?limit=${limit}`),
+  // The shop is taken from the token server-side, so nothing here names one.
+  // When it was sent in the body, the approval check was asking the caller
+  // which identity to check them against -- and an unapproved terminal could
+  // simply send somebody else's.
+  startVerification: (body) => request('POST', '/api/merchant/verify/start', body),
+
   // `pin` is absent on the first call: the till cannot ask whose PIN to enter
   // until the face has been identified, so the flow is scan, prompt, charge.
   charge: (sessionId, amount, pin) =>

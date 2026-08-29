@@ -78,10 +78,16 @@ async function signInMerchant() {
 
 /** Run a scan through liveness and stop, ready to be charged. */
 async function scan(token) {
-  const start = await fetch(`${ctx.baseUrl}/api/verify/start`, {
+  // The shop comes from the token now -- there is no longer a way to name one
+  // in the body, which is what let an unapproved terminal borrow somebody
+  // else's id.
+  const start = await fetch(`${ctx.baseUrl}/api/merchant/verify/start`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ merchantId: 'shop-1', deviceId: 'till' }),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ deviceId: 'till' }),
   }).then((r) => r.json());
 
   ctx.ml.state.livenessOutcome = 'passed';

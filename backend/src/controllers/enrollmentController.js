@@ -6,7 +6,7 @@ import { User } from '../models/User.js';
 import { buildCandidatePool } from '../services/candidatePool.js';
 import { encryptEmbedding } from '../services/encryption.js';
 import { evict } from '../services/galleryCache.js';
-import { hashPin, rejectWeakPin } from '../services/pin.js';
+import { hashPin, rejectWeakPin, verifyPin } from '../services/pin.js';
 import { mlService } from '../services/mlServiceClient.js';
 import { ApiError } from '../middleware/errorHandler.js';
 
@@ -139,6 +139,26 @@ export async function finalizeEnrollment(req, res) {
 
   const existing = await findExistingRegistration(result.embedding_b64);
 
+  // A sealed record must prove its PIN before it can be rewritten.
+  //
+  // This is what stops a face on its own being enough. Without it, presenting
+  // somebody's live face and choosing a new PIN takes the second factor away
+  // from them -- and the face was only ever supposed to be the first of two.
+  // Sealed records refuse the whole enrollment rather than just the PIN, so a
+  // stranger cannot even refresh the stored signature.
+  //
+  // Unsealed records are the ones that predate this, and each gets exactly one
+  // more pass through the old route before sealing itself below.
+  if (existing?.pinSealed) {
+    if (!existing.pinHash || !verifyPin(body.pin, existing.pinHash)) {
+      throw new ApiError(
+        403,
+        'This face is already registered. Enter the PIN you set for it.',
+        'pin_required_to_reenrol',
+      );
+    }
+  }
+
   const enrollment = {
     samplesUsed: result.samples_used,
     meanSimilarity: result.mean_similarity,
@@ -165,12 +185,15 @@ export async function finalizeEnrollment(req, res) {
             enrollment,
             lastSeenAt: new Date(),
             ...(session.region ? { homeRegion: session.region } : {}),
-            // A returning face always sets a PIN now, replacing whatever was
-            // there. That is also the route back for the people who enrolled
-            // while it was optional: register again and you leave with one.
+            // Reached either because the record was never sealed -- its one
+            // remaining use of the old "re-register to set a PIN" route -- or
+            // because the PIN just given already matched. Both end the same
+            // way: the PIN on file is the one supplied, and the record seals,
+            // so this is the last time showing the face alone gets here.
             pinHash: hashPin(body.pin),
             pinFailures: 0,
             pinLockedUntil: null,
+            pinSealed: true,
           },
         },
         { new: true },
@@ -183,6 +206,9 @@ export async function finalizeEnrollment(req, res) {
         knownMerchants: session.merchantId ? [session.merchantId] : [],
         recoveryDigits: body.recoveryDigits ?? null,
         pinHash: hashPin(body.pin),
+        // Choosing it here *is* the confirmation, so there is nothing to leave
+        // open.
+        pinSealed: true,
       });
 
   // Both branches above wrote a signature -- a new one or a replacement -- so
@@ -203,6 +229,14 @@ export async function finalizeEnrollment(req, res) {
     // The kiosk shows something different for a returning face, and the caller
     // should not have to infer which happened from the status code.
     updatedExisting: Boolean(existing),
+    // Whether this face already has an email and password on it. Reported so
+    // the account portal can say so plainly instead of attempting a claim that
+    // is bound to fail and showing the caller a wrong-PIN message for it.
+    //
+    // Not a disclosure worth worrying about: reaching this point means five
+    // samples of a live face got past liveness and anti-spoofing, so whoever
+    // is asking was standing in front of the camera holding that face.
+    hasAccount: Boolean(existing?.hasAccount),
     // Whether this identity can complete a payment, which needs both factors.
     // Always true now that a PIN is required, and kept so a caller does not
     // have to know that to answer the question.
@@ -248,7 +282,7 @@ async function findExistingRegistration(embeddingB64) {
   // a real person's identity written onto a research record, and every later
   // payment of theirs refused as a benchmark match.
   const sources = await User.find({ _id: { $in: close.map((c) => c.user_id) } })
-    .select('source benchmarkLabel')
+    .select('source benchmarkLabel email pinSealed +pinHash')
     .lean();
   const byId = new Map(sources.map((u) => [String(u._id), u]));
 
@@ -265,5 +299,14 @@ async function findExistingRegistration(embeddingB64) {
   const duplicate = close.find((c) => byId.get(c.user_id)?.source !== 'benchmark');
   if (!duplicate) return null;
 
-  return { userId: duplicate.user_id, score: duplicate.score };
+  return {
+    userId: duplicate.user_id,
+    score: duplicate.score,
+    // Whether this face has an email and password on it already. What that
+    // gates is the PIN below, so it has to come back from here.
+    hasAccount: Boolean(byId.get(duplicate.user_id)?.email),
+    // And whether its PIN is still open to being replaced. See User.pinSealed.
+    pinSealed: Boolean(byId.get(duplicate.user_id)?.pinSealed),
+    pinHash: byId.get(duplicate.user_id)?.pinHash ?? null,
+  };
 }

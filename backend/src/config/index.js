@@ -74,6 +74,11 @@ const schema = z.object({
   // Candidate pool narrowing. At demo scale everyone is a candidate; these are
   // the levers that keep the pool bounded as enrollment grows.
   CANDIDATE_POOL_ACTIVE_DAYS: z.coerce.number().int().positive().default(180),
+  // The shop id the public kiosk books its sessions under. Fixed here
+  // rather than taken from the request, because a caller that can name a
+  // shop can borrow one -- see startVerification.
+  KIOSK_MERCHANT_ID: z.string().trim().min(1).default('demo-shop'),
+
   CANDIDATE_POOL_MAX: z.coerce.number().int().positive().default(5000),
 
   // Below this many active users, narrowing is skipped entirely and everyone

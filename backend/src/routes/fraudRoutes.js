@@ -5,6 +5,8 @@ import {
   confirm,
   detail,
   list,
+  pendingMerchants,
+  verifyMerchant,
 } from '../controllers/fraudDashboardController.js';
 import { asyncRoute } from '../middleware/errorHandler.js';
 import { requireAdmin } from '../middleware/requireAdmin.js';
@@ -24,3 +26,9 @@ fraudRoutes.get('/flags/:id', asyncRoute(detail));
 // cleared flags on one rule is that rule saying it is tuned too tight.
 fraudRoutes.post('/flags/:id/clear', asyncRoute(clear));
 fraudRoutes.post('/flags/:id/confirm', asyncRoute(confirm));
+
+// Approving a shop's terminal. Here because it is the one screen an admin
+// already has, and because deciding who may point a camera at customers
+// belongs next to the record of what those cameras have been doing.
+fraudRoutes.get('/merchants/pending', asyncRoute(pendingMerchants));
+fraudRoutes.post('/merchants/:id/verify', asyncRoute(verifyMerchant));

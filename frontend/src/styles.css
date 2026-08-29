@@ -1,19 +1,35 @@
+/*
+ * One palette for every screen.
+ *
+ * The landing page used to carry its own -- a different green, hairline
+ * borders instead of solid ones, a tighter type scale -- which meant clicking
+ * "Merchant" took you from one product to something that looked like another.
+ * Those values won, and they live here now; the landing block below aliases
+ * these rather than redefining them, so there is a single place to change any
+ * of it.
+ */
 :root {
-  --bg: #0a0c10;
-  --surface: #12161d;
-  --surface-2: #1a2029;
-  --line: #252c37;
+  --bg: #08090b;
+  --surface: #101317;
+  --surface-2: #171b21;
 
-  --text: #e8ecf2;
-  --muted: #8b95a5;
+  /* Translucent rather than a fixed grey, so a border sits correctly on a
+     card, on the page, and over the landing's video without three variants. */
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.17);
 
-  --accent: #4dd6c1;
-  --accent-dim: #1f4d47;
+  --text: #f4f6f9;
+  --muted: #9aa3b0;
+  --faint: #6a7382;
+
+  --accent: #16c47f;
+  --accent-dim: rgba(22, 196, 127, 0.12);
+  --on-accent: #04180f;
   --warn: #f0b429;
   --danger: #f3676b;
 
-  --radius: 18px;
-  --shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  --radius: 16px;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
 
   color-scheme: dark;
 }
@@ -67,20 +83,66 @@ button {
   padding-block: 8px 20px;
 }
 
-.wordmark {
-  display: flex;
+/*
+ * The mark, at the one size every screen but the landing uses.
+ *
+ * Shared rather than repeated: the four app screens carried a green dot and
+ * the landing carried a drawn logo, so moving between them read as leaving the
+ * product. `Wordmark` renders this; `.mark-lg` is the landing's larger cut.
+ */
+.mark {
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  gap: 10px;
+  color: var(--text);
+  text-decoration: none;
 }
 
-.wordmark .dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 12px var(--accent);
+.mark-glyph {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.mark-glyph svg {
+  width: 17px;
+  height: 17px;
+}
+
+.mark-text {
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+/* The surface this mark is on, said quietly after the name. */
+.mark-text em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--faint);
+}
+.mark-text em::before {
+  content: ' · ';
+}
+
+.mark-lg .mark-glyph {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+.mark-lg .mark-glyph svg {
+  width: 23px;
+  height: 23px;
+}
+.mark-lg .mark-text {
+  font-size: clamp(19px, 2.4vw, 23px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
 }
 
 .link-button {
@@ -105,20 +167,20 @@ button {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: 22px;
 }
 
 h1 {
-  font-size: clamp(26px, 7vw, 34px);
-  line-height: 1.12;
+  font-size: clamp(27px, 7vw, 36px);
+  line-height: 1.1;
   letter-spacing: -0.03em;
-  font-weight: 680;
+  font-weight: 600;
 }
 
 h2 {
-  font-size: 15px;
-  font-weight: 620;
-  letter-spacing: -0.01em;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .lede {
@@ -149,7 +211,13 @@ h2 {
   border-radius: 13px;
   font-weight: 620;
   font-size: 16px;
-  transition: transform 0.12s ease, background 0.15s ease, opacity 0.15s ease;
+  letter-spacing: -0.01em;
+  transition:
+    transform 0.12s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    filter 0.15s ease,
+    opacity 0.15s ease;
 }
 .btn:active {
   transform: scale(0.985);
@@ -162,12 +230,21 @@ h2 {
 
 .btn-primary {
   background: var(--accent);
-  color: #06231f;
+  color: var(--on-accent);
+  /* The same glow the landing's pay button carries, at a size that suits a
+     form rather than a hero. */
+  box-shadow: 0 12px 34px -14px rgba(22, 196, 127, 0.65);
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.05);
 }
 .btn-secondary {
-  background: var(--surface-2);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text);
   border: 1px solid var(--line);
+}
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--line-strong);
 }
 .btn-ghost {
   color: var(--muted);
@@ -478,14 +555,16 @@ h2 {
   width: 100%;
   padding: 14px 15px;
   border-radius: 12px;
-  background: var(--surface-2);
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--line);
   color: var(--text);
   font: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .field input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(22, 196, 127, 0.14);
 }
 
 footer {
@@ -803,7 +882,7 @@ footer {
   gap: 4px;
   padding: 4px;
   margin-bottom: 4px;
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--line);
   border-radius: 999px;
   overflow-x: auto;
@@ -831,8 +910,9 @@ footer {
 }
 
 .tab.active {
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .plain-list {
@@ -918,781 +998,1064 @@ footer {
   color: var(--muted);
 }
 
+
+
 /* ================= landing page ================= */
 /*
- * The one screen that is read rather than operated, so it is the one screen
- * allowed out of the 520px kiosk column and the one carrying its own
- * navigation and footer.
+ * A scroll of full-height panels over one fixed background loop.
  *
- * It also carries its own accent. The kiosk is teal throughout; the front page
- * follows the green-to-violet identity in the reference design. Keeping the
- * two separate lets the landing look right without repainting every camera
- * screen behind it.
+ * The landing is its own scroll container rather than letting the document
+ * scroll, so snapping and the fixed backdrop stay scoped to this page and
+ * cannot leak into the kiosk, the till or the portal.
+ *
+ * Palette is two greys and one accent, and the accent appears exactly once —
+ * on the pay button. Everything else is quiet so that button has nothing to
+ * compete with.
  */
 
 .landing {
-  --brand: #22c55e;
-  --brand-2: #3b82f6;
-  --brand-3: #8b5cf6;
-  --grad: linear-gradient(100deg, #22c55e 0%, #3b82f6 62%, #8b5cf6 100%);
-  --brand-dim: rgba(34, 197, 94, 0.13);
-  --brand-line: rgba(34, 197, 94, 0.28);
+  /* Aliases, not definitions. The names read better in this file's rules and
+     the values come from :root, so the landing can no longer drift from the
+     screens it links to. */
+  --ink: var(--text);
+  --body: var(--muted);
+  --edge: var(--line);
+  --edge-strong: var(--line-strong);
+  --measure: min(1080px, 100% - 44px);
 
-  display: flex;
-  flex-direction: column;
-  gap: 72px;
-  padding-bottom: 8px;
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* No `scroll-snap-type` here on purpose. The momentum layer animates the
+     real scroll position frame by frame and snapping tries to seize that same
+     position the instant a gesture ends; running both turns every flick into a
+     tug of war that reads as stutter. See useSmoothScroll.js. */
+  color: var(--body);
+
+  /* Written every frame by the momentum layer. Declared so the effects below
+     have something sane to read before the first scroll event. */
+  --scroll: 0;
 }
 
+/* The landing manages its own width and scrolling; the kiosk column does not
+   apply to it. */
 .app-wide {
-  max-width: 1180px;
+  max-width: none;
+  padding: 0;
+  height: 100%;
 }
 
-.grad-text {
-  background: var(--grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.landing h1,
+.landing h2,
+.landing h3 {
+  color: var(--ink);
+  letter-spacing: -0.03em;
+  font-weight: 600;
 }
 
-/* ---------- landing: navbar ---------- */
+/* The single child the momentum layer measures to know the page's height.
+   Everything that scrolls lives in here; the backdrop does not. */
+.scroll {
+  position: relative;
+  z-index: 1;
+}
 
-.nav {
+/* ---------- the backdrop ---------- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.backdrop video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Enough presence to read as a moving backdrop rather than a texture. The
+     veil below is what protects contrast, so this can sit higher than it
+     otherwise could. */
+  opacity: 0.34;
+  /* Drifts and grows very slightly across the whole page. Large enough to
+     give the scroll some depth, small enough that nobody catches it doing it. */
+  transform: scale(calc(1 + var(--scroll, 0) * 0.09))
+    translateY(calc(var(--scroll, 0) * -2.5%));
+  transform-origin: center 40%;
+  will-change: transform;
+}
+.veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 50% 0%, transparent 24%, rgba(8, 9, 11, 0.68) 100%),
+    linear-gradient(180deg, rgba(8, 9, 11, 0.42), rgba(8, 9, 11, 0.74));
+}
+
+/* ---------- bar ---------- */
+
+.landing .bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  width: var(--measure);
+  margin-inline: auto;
+  height: 76px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  flex-wrap: wrap;
-  padding: 14px 0 4px;
 }
 
-.nav-brand {
+.landing .mark-glyph {
+  backdrop-filter: blur(6px);
+}
+
+.landing .bar nav {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  text-decoration: none;
-  color: var(--text);
-}
-.nav-brand strong {
-  display: block;
-  font-size: 19px;
-  font-weight: 680;
-  letter-spacing: -0.025em;
-}
-.nav-brand em {
-  display: block;
-  font-style: normal;
-  font-size: 11.5px;
-  color: var(--muted);
-}
-
-.nav-logo {
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--brand-line);
-  background: var(--brand-dim);
-  color: var(--brand);
-}
-.nav-logo svg {
-  width: 21px;
-  height: 21px;
-}
-
-.nav-portals {
-  display: flex;
-  gap: 10px;
-}
-
-.portal {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 15px;
-  border-radius: 12px;
-  border: 1px solid var(--brand-line);
-  background: rgba(34, 197, 94, 0.05);
-  text-decoration: none;
-  color: var(--text);
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.portal:hover {
-  background: var(--brand-dim);
-  border-color: var(--brand);
-}
-.portal svg {
-  width: 19px;
-  height: 19px;
-  color: var(--brand);
-  flex: none;
-}
-.portal strong {
-  display: block;
-  font-size: 13.5px;
-  font-weight: 620;
-}
-.portal em {
-  display: block;
-  font-style: normal;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-/* ---------- landing: hero ---------- */
-
-.hero {
-  display: grid;
-  gap: 40px;
-  align-items: start;
-}
-
-.hero-copy,
-.hero-demo {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-}
-
-.eyebrow {
-  align-self: flex-start;
-  padding: 6px 13px;
-  border-radius: 999px;
-  border: 1px solid var(--brand-line);
-  background: var(--brand-dim);
-  color: var(--brand);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.hero h1 {
-  font-size: clamp(34px, 6vw, 54px);
-  line-height: 1.06;
-  letter-spacing: -0.035em;
-  font-weight: 700;
-}
-
-.hero .lede {
-  font-size: 16px;
-  max-width: 50ch;
-}
-
-/* ---------- landing: hero feature list ---------- */
-
-.feature-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.feature-list li {
-  display: grid;
-  grid-template-columns: 40px 1fr;
-  gap: 14px;
-  align-items: start;
-}
-.feature-list strong {
-  display: block;
-  font-size: 14.5px;
-  font-weight: 620;
-  margin-bottom: 2px;
-}
-.feature-list .muted {
-  display: block;
-  font-size: 13.5px;
-}
-
-.feature-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 11px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--brand-line);
-  background: var(--brand-dim);
-  color: var(--brand);
-  flex: none;
-}
-.feature-icon svg {
-  width: 20px;
-  height: 20px;
-}
-.feature-icon.sm {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-}
-.feature-icon.sm svg {
-  width: 16px;
-  height: 16px;
-}
-
-.trust-callout {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 15px;
-  border-radius: 13px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  font-size: 13.5px;
-  color: var(--muted);
-}
-
-/* ---------- landing: demo panel ---------- */
-
-.demo-panel {
-  border: 1px solid var(--brand-line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  overflow: hidden;
-  box-shadow: var(--shadow);
-}
-
-.demo-chrome {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 11px 15px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-2);
-}
-.demo-mark {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 13px;
-  font-weight: 620;
 }
-.demo-mark svg {
-  width: 17px;
-  height: 17px;
-  color: var(--brand);
+.landing .ghost {
+  padding: 8px 15px;
+  border-radius: 9px;
+  border: 1px solid var(--edge);
+  background: rgba(10, 12, 16, 0.45);
+  backdrop-filter: blur(8px);
+  color: var(--body);
+  font-size: 13.5px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
-.demo-dots {
-  display: flex;
-  gap: 5px;
-}
-.demo-dots i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--line);
+.landing .ghost:hover {
+  color: var(--ink);
+  border-color: var(--edge-strong);
 }
 
-.demo-stage {
-  aspect-ratio: 16 / 10;
-  background: #06080b;
+/* ---------- panels ---------- */
+
+.landing main {
+  position: relative;
+  z-index: 1;
+}
+
+.panel {
+  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-}
-.demo-video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+  /* The bar is sticky and 76px tall, so the first panel would otherwise sit
+     that much too low. */
+  margin-top: -76px;
+  padding-block: 96px 72px;
 }
 
-.demo-empty {
+.panel-inner {
+  width: var(--measure);
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 9px;
-  text-align: center;
-  padding: 28px;
-  max-width: 40ch;
+  gap: 20px;
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.demo-empty-icon {
-  width: 34px;
-  height: 34px;
-  color: var(--brand);
-  opacity: 0.7;
-}
-.demo-empty strong {
-  font-size: 14.5px;
-  font-weight: 620;
-}
-.demo-empty p {
-  font-size: 13px;
-}
-.demo-empty code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  color: var(--brand);
-}
-
-.demo-caption {
-  margin: 0;
-  padding: 10px 15px 0;
-  font-size: 11.5px;
-  color: var(--muted);
-  text-align: center;
-}
-
-/* The compact stage list under the video: the same flow as the section below,
-   kept beside the recording so the panel explains itself before anyone
-   presses play. */
-.demo-flow {
-  list-style: none;
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  padding: 13px;
-  border-top: 1px solid var(--line);
-  background: var(--surface-2);
-  overflow-x: auto;
-}
-.demo-flow li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-.demo-flow-step {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 11px;
-  border-radius: 10px;
-  border: 1px solid var(--brand-line);
-  background: rgba(34, 197, 94, 0.06);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.demo-flow-tick {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--brand);
-  color: #04140a;
-  font-size: 9px;
-  font-weight: 800;
-}
-.demo-flow-arrow {
-  color: var(--muted);
-  font-size: 17px;
-  padding: 0 3px;
-}
-
-/* ---------- landing: the two hero CTAs ---------- */
-
-.cta-primary,
-.cta-secondary {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  padding: 16px 18px;
-  border-radius: 15px;
-  text-align: left;
-  transition: transform 0.12s ease, filter 0.15s ease, border-color 0.15s ease;
-}
-.cta-primary:active,
-.cta-secondary:active {
-  transform: scale(0.99);
-}
-.cta-primary:disabled,
-.cta-secondary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.panel.is-in .panel-inner {
+  opacity: 1;
   transform: none;
 }
 
-.cta-secondary {
-  border: 1px solid var(--brand-line);
-  background: rgba(34, 197, 94, 0.05);
-}
-.cta-secondary:hover:not(:disabled) {
-  border-color: var(--brand);
-}
-
-.cta-primary {
-  background: var(--grad);
-  color: #ffffff;
-  border: none;
-}
-.cta-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
-.cta-primary strong,
-.cta-secondary strong {
-  display: block;
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-.cta-primary em,
-.cta-secondary em {
-  display: block;
-  font-style: normal;
-  font-size: 12.5px;
-  opacity: 0.82;
-}
-.cta-secondary em {
-  color: var(--muted);
-  opacity: 1;
-}
-
-.cta-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  display: grid;
-  place-items: center;
-  flex: none;
-  background: rgba(255, 255, 255, 0.14);
-}
-.cta-icon svg {
-  width: 20px;
-  height: 20px;
-}
-.cta-secondary .cta-icon {
-  background: var(--brand-dim);
-  color: var(--brand);
-}
-.cta-chevron {
-  margin-left: auto;
-  font-size: 22px;
-  opacity: 0.75;
-}
-
-.or-divider {
-  display: flex;
+.panel-hero .panel-inner {
   align-items: center;
-  gap: 14px;
-  color: var(--muted);
+  text-align: center;
+}
+
+.eyebrow {
   font-size: 12px;
   font-weight: 600;
-}
-.or-divider::before,
-.or-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--line);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
-.inline-link {
-  color: var(--brand);
-  font-weight: 620;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.panel h1 {
+  font-size: clamp(44px, 9.2vw, 96px);
+  line-height: 1.0;
+  /* No max-width. The two lines are sized to break where they are written,
+     and a character limit here is what was folding the second one in half. */
+}
+.panel h2 {
+  font-size: clamp(26px, 4.4vw, 42px);
+  line-height: 1.12;
+  max-width: 20ch;
 }
 
-/* ---------- landing: trust strip ---------- */
-
-.trust-strip {
-  display: grid;
-  gap: 16px;
-  padding: 22px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: var(--surface);
+.landing .lead {
+  font-size: clamp(15px, 1.8vw, 17.5px);
+  line-height: 1.62;
+  max-width: 48ch;
+  color: var(--body);
 }
-.trust-strip > div {
-  display: flex;
+
+.landing .offline {
+  font-size: 14px;
+  color: var(--danger);
+  padding: 11px 16px;
+  border: 1px solid rgba(243, 103, 107, 0.32);
+  border-radius: 10px;
+}
+
+/* ---------- the one loud element ---------- */
+
+.pay {
+  margin-top: 14px;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 12px;
+  padding: clamp(19px, 2.6vw, 25px) clamp(34px, 5.4vw, 60px);
+  border-radius: 15px;
+  background: var(--accent);
+  color: #04180f;
+  font-size: clamp(17px, 2.2vw, 21px);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  box-shadow:
+    0 0 0 1px rgba(22, 196, 127, 0.5),
+    0 20px 60px -16px rgba(22, 196, 127, 0.6);
+  transition: transform 0.15s ease, box-shadow 0.25s ease, filter 0.15s ease;
 }
-.trust-strip strong {
-  display: block;
-  font-size: 13.5px;
-  font-weight: 620;
+.pay:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow:
+    0 0 0 1px rgba(22, 196, 127, 0.62),
+    0 26px 74px -16px rgba(22, 196, 127, 0.75);
 }
-.trust-strip em {
-  display: block;
-  font-style: normal;
-  font-size: 12px;
-  color: var(--muted);
+.pay:active:not(:disabled) {
+  transform: translateY(0);
+}
+.pay:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.pay span {
+  font-size: 0.9em;
 }
 
-/* ---------- landing: sections ---------- */
+.cue {
+  margin-top: 30px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--faint);
+  animation: cue 2.4s ease-in-out infinite;
+}
+@keyframes cue {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.85;
+    transform: translateY(5px);
+  }
+}
 
-.band {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.band h2 {
-  font-size: clamp(23px, 3.6vw, 31px);
-  font-weight: 680;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
-}
-.band-lede {
-  max-width: 62ch;
-  margin-bottom: 18px;
-}
+/* ---------- steps ---------- */
 
-.steps-row,
-.grid-4,
-.grid-2 {
+.landing .steps {
+  list-style: none;
   display: grid;
   gap: 14px;
+  margin-top: 12px;
+  width: 100%;
 }
-.steps-row {
-  list-style: none;
-}
-
-.step-card {
+.landing .steps li {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 18px;
-  border-radius: 15px;
-  border: 1px solid var(--line);
-  background: var(--surface);
+  gap: 9px;
+  padding: 24px 22px;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  background: rgba(10, 12, 16, 0.55);
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  /* Staggered off the panel's own reveal, so the four arrive in order rather
+     than all at once. */
+  transition-delay: calc(var(--i) * 90ms);
 }
-.step-n {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--brand);
+.landing .panel.is-in .steps li {
+  opacity: 1;
+  transform: none;
 }
-.step-card strong {
-  font-size: 14.5px;
-  font-weight: 620;
-  letter-spacing: -0.01em;
+.landing .steps h3 {
+  font-size: 15.5px;
 }
-.step-card p {
-  font-size: 13px;
+.landing .steps p {
+  font-size: 13.5px;
+  line-height: 1.55;
 }
 
-.sec-card,
-.path-card {
+.step-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--edge-strong);
+  border-radius: 10px;
+  color: var(--ink);
+  flex: none;
+}
+.step-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.step-n {
+  position: absolute;
+  top: 24px;
+  right: 22px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+
+.outcome {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--body);
+  max-width: 60ch;
+}
+
+/* ---------- portal cards ---------- */
+
+.cards {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+  width: 100%;
+}
+.landing .card {
   display: flex;
   flex-direction: column;
   gap: 11px;
+  padding: 28px 24px;
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: rgba(10, 12, 16, 0.55);
+  backdrop-filter: blur(10px);
+  text-decoration: none;
+  transition: border-color 0.18s ease, transform 0.18s ease;
 }
-.sec-card strong,
-.path-card strong {
-  font-size: 15px;
-  font-weight: 620;
-  letter-spacing: -0.01em;
+.landing .card:hover {
+  border-color: var(--edge-strong);
+  transform: translateY(-3px);
 }
-.sec-card p {
+.landing .card h3 {
+  font-size: 17px;
+}
+.landing .card p {
   font-size: 13.5px;
-}
-
-.path-card .plain-list {
+  line-height: 1.58;
   flex: 1;
 }
-.path-card .btn {
-  text-decoration: none;
-  margin-top: 4px;
-}
-
-/* ---------- landing: privacy flow ---------- */
-
-.privacy-flow {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-}
-.privacy-flow li {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.privacy-node {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  text-align: center;
-}
-.privacy-mark {
-  width: 46px;
-  height: 46px;
-  border-radius: 13px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--brand-line);
-  background: var(--brand-dim);
-  color: var(--brand);
-}
-.privacy-mark svg {
-  width: 22px;
-  height: 22px;
-}
-.privacy-flow strong {
-  font-size: 14px;
-  font-weight: 620;
-  margin-top: 4px;
-}
-.privacy-flow em {
-  font-style: normal;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-/* One glyph for both layouts: pointing down while the stages are stacked,
-   turned upright once they sit in a row. */
-.privacy-arrow {
-  color: var(--muted);
-  font-size: 18px;
-  line-height: 1;
-  padding: 12px 0;
-  transform: rotate(90deg);
-}
-
-.highlight-line {
-  margin-top: 22px;
-  padding: 16px 20px;
-  border-radius: 14px;
-  border: 1px solid var(--brand-line);
-  background: var(--brand-dim);
-  color: var(--text);
-  font-size: 14.5px;
+.card-go {
+  font-size: 13.5px;
   font-weight: 600;
-  text-align: center;
+  color: var(--accent);
 }
 
-/* ---------- landing: closing ---------- */
+.first-time {
+  margin-top: 6px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--faint);
+}
+.landing .link {
+  padding: 0;
+  color: var(--body);
+  font-size: inherit;
+  border-bottom: 1px solid var(--edge-strong);
+  border-radius: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.landing .link:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.landing .link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
-.final-cta {
-  display: flex;
-  flex-direction: column;
+/* ---------- support ---------- */
+
+.mailto {
+  align-self: flex-start;
+  margin-top: 10px;
+  display: inline-flex;
   align-items: center;
-  gap: 14px;
-  text-align: center;
-  padding: 46px 24px;
-  border-radius: var(--radius);
-  border: 1px solid var(--brand-line);
-  background:
-    radial-gradient(120% 140% at 50% 0%, rgba(34, 197, 94, 0.1), transparent 65%),
-    var(--surface);
+  gap: 10px;
+  padding: 14px 22px;
+  border: 1px solid var(--edge-strong);
+  border-radius: 12px;
+  background: rgba(10, 12, 16, 0.55);
+  backdrop-filter: blur(10px);
+  color: var(--ink);
+  font-size: 15px;
+  text-decoration: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
-.final-cta h2 {
-  font-size: clamp(22px, 3.4vw, 30px);
-  font-weight: 680;
-  letter-spacing: -0.03em;
+.mailto:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
-.final-cta-row {
+.mailto svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ---------- foot ---------- */
+
+.foot {
+  position: relative;
+  z-index: 1;
+  width: var(--measure);
+  margin-inline: auto;
+  padding-block: 26px 34px;
+  border-top: 1px solid var(--edge);
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-  width: 100%;
+  gap: 8px 22px;
+  justify-content: space-between;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--faint);
 }
-.final-cta-row .btn {
-  width: auto;
-  flex: 0 1 240px;
-}
-
-.btn-grad {
-  background: var(--grad);
-  color: #ffffff;
-}
-.btn-grad:hover:not(:disabled) {
-  filter: brightness(1.08);
+.foot span:first-child {
+  color: var(--body);
+  font-weight: 600;
 }
 
-.site-foot {
+/* ---------- responsive ---------- */
+
+@media (min-width: 620px) {
+  .landing .steps,
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 980px) {
+  .landing .steps {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 420px) {
+  /* The wordmark and both portal links stop fitting on one row; wrapping
+     keeps the tap targets full size instead of squeezing them. */
+  .landing .bar {
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding-block: 14px;
+  }
+  .landing .bar nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .landing .ghost {
+    text-align: center;
+  }
+  .panel {
+    margin-top: 0;
+    padding-block: 56px;
+  }
+}
+
+/* Asked for less motion: everything is simply already where it belongs, and
+   the scroll stops snapping. */
+@media (prefers-reduced-motion: reduce) {
+  .panel-inner,
+  .landing .steps li {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .cue {
+    animation: none;
+  }
+  .backdrop video {
+    display: none;
+  }
+}
+
+/* ---------- scroll-driven storytelling ---------- */
+/*
+ * Every effect below reads `--p`, the fraction of the way a panel has
+ * travelled through the viewport: 0 as its top edge reaches the bottom of the
+ * screen, 0.5 dead centre, 1 once it has left the top.
+ *
+ * Driven by position rather than by duration, which is the whole difference.
+ * A timed animation plays once and is gone; these rewind when the reader
+ * scrolls back up, so the page always looks the way its scroll position says
+ * it should.
+ */
+
+/* How far past centre a panel has gone. 0 while it is arriving or centred,
+   then 0 to 1 as it leaves upward. */
+.panel {
+  --exit: clamp(0, (var(--p, 0) - 0.55) * 2.6, 1);
+}
+
+/* The hero's cue has one job and it is finished the moment anyone scrolls. */
+.panel-hero .cue {
+  opacity: calc(1 - var(--exit) * 2.4);
+}
+
+/* A hairline of progress across the very top. The only chrome on the page,
+   and it earns its place by being the one thing that says how much is left. */
+.progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 5;
+  background: var(--accent);
+  transform: scaleX(var(--scroll, 0));
+  transform-origin: 0 50%;
+  opacity: 0.85;
+}
+
+/*
+ * The four steps light up in turn as the panel crosses the screen.
+ *
+ * Each waits for its own slice of the panel's travel -- `--i` is the step's
+ * index, set in the markup -- so scrolling through the section plays the
+ * sequence in order, and scrolling back plays it backwards. The multiplier is
+ * what makes each transition brisk rather than a slow fade across the whole
+ * section.
+ */
+.landing .steps li {
+  --lit: clamp(0, (var(--p, 0) - 0.24 - var(--i, 0) * 0.055) * 14, 1);
+  border-color: rgba(255, 255, 255, calc(0.09 + var(--lit) * 0.14));
+}
+.landing .steps li .step-icon {
+  color: color-mix(in srgb, var(--ink), var(--accent) calc(var(--lit) * 100%));
+  border-color: color-mix(
+    in srgb,
+    var(--edge-strong),
+    var(--accent) calc(var(--lit) * 55%)
+  );
+}
+.landing .steps li .step-n {
+  color: color-mix(in srgb, var(--faint), var(--accent) calc(var(--lit) * 70%));
+}
+
+/* Headings drift a little slower than the page they sit on. Six pixels is
+   enough to feel like depth and little enough that nobody sees it happen. */
+.panel h2 {
+  transform: translateY(calc((0.5 - var(--p, 0.5)) * 22px));
+}
+
+/* Nothing here is load-bearing: with less motion asked for, every effect
+   resolves to its resting state and the page simply sits still. */
+@media (prefers-reduced-motion: reduce) {
+  .backdrop video {
+    transform: none;
+  }
+  .panel h2 {
+    transform: none;
+  }
+  .panel-hero .cue {
+    opacity: 0.5;
+  }
+  .landing .steps li {
+    border-color: var(--edge);
+  }
+  .landing .steps li .step-icon {
+    color: var(--ink);
+    border-color: var(--edge-strong);
+  }
+  .landing .steps li .step-n {
+    color: var(--faint);
+  }
+  .progress {
+    display: none;
+  }
+}
+
+/* ---------- the headline, revealed a line at a time ---------- */
+/*
+ * Each line sits in its own clipped box and rises out of it. It is the effect
+ * a motion library would be reached for, and it is two rules — the mask is
+ * just `overflow: hidden` on a block that wraps one line of text.
+ *
+ * `translate` rather than `transform` on purpose: it composes as its own
+ * property, so the scroll-driven transforms elsewhere on the page can move the
+ * same elements without the two overwriting each other.
+ */
+
+.landing h1 .line {
+  display: block;
+  overflow: hidden;
+  /* Descenders sit below the baseline and a tight mask shears them off. */
+  padding-bottom: 0.09em;
+  margin-bottom: -0.09em;
+}
+
+.landing h1 .line > span {
+  display: block;
+  translate: 0 108%;
+  transition: translate 1.05s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.landing .panel.is-in h1 .line > span {
+  translate: 0 0;
+}
+/* The second line follows rather than arrives alongside, which is what makes
+   it read as a sentence finishing instead of a block appearing. */
+.landing h1 .line:nth-child(2) > span {
+  transition-delay: 0.13s;
+}
+
+/*
+ * The subordinate line. Smaller for hierarchy, and sized so it fits on one
+ * line at every width — the reason it was folding in half before was a
+ * `max-width` on the heading, not the length of the words.
+ *
+ * The clamp is what makes `nowrap` safe: eighteen characters at the largest
+ * size this reaches is well inside the measure, and on a narrow phone it
+ * settles at 21px, which fits with room to spare.
+ */
+.landing h1 .line.dim {
+  font-size: clamp(21px, 5vw, 46px);
+  line-height: 1.16;
+  color: var(--faint);
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  margin-top: 0.12em;
+}
+
+/* ---------- hero entrance ---------- */
+/*
+ * The hero's children come in one after another rather than as a single block,
+ * so the eye is walked down to the button instead of being shown everything at
+ * once. The panel's own reveal is switched off here to make room for it —
+ * running both would fade the whole group in while its parts were still
+ * arriving.
+ */
+.landing .panel-hero .panel-inner {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+
+.landing .panel-hero .lead,
+.landing .panel-hero .pay,
+.landing .panel-hero .offline {
+  opacity: 0;
+  translate: 0 20px;
+  transition:
+    opacity 0.8s ease,
+    translate 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.landing .panel-hero.is-in .lead,
+.landing .panel-hero.is-in .pay,
+.landing .panel-hero.is-in .offline {
+  opacity: 1;
+  translate: 0 0;
+}
+.landing .panel-hero .lead {
+  transition-delay: 0.34s;
+}
+.landing .panel-hero .offline {
+  transition-delay: 0.4s;
+}
+.landing .panel-hero .pay {
+  transition-delay: 0.46s;
+}
+
+/* The cue is last, and only once there is something to scroll to. */
+.landing .panel-hero .cue {
+  animation: none;
+}
+.landing .panel-hero.is-in .cue {
+  animation: cue 2.4s ease-in-out 1.3s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing h1 .line > span,
+  .landing .panel-hero .lead,
+  .landing .panel-hero .pay,
+  .landing .panel-hero .offline {
+    opacity: 1;
+    translate: 0 0;
+    transition: none;
+  }
+  .landing .panel-hero.is-in .cue {
+    animation: none;
+  }
+}
+
+/* ---------- headline: room for the descenders ---------- */
+/*
+ * The reveal mask is `overflow: hidden`, so anything outside the line box gets
+ * sheared off — and at `line-height: 1` the box *is* the font size, which puts
+ * the tails of "y" and "g" outside it. The clipped "y" in "Pay" was the box,
+ * not the mask.
+ *
+ * Two changes, both needed. The line box gets enough height to hold a
+ * descender, and the mask gets padding to match, pulled back by an equal
+ * negative margin so the gap between the two lines does not grow.
+ */
+.landing h1 {
+  line-height: 1.08;
+}
+
+.landing h1 .line {
+  padding-bottom: 0.24em;
+  margin-bottom: -0.24em;
+  /* A little headroom too: at these sizes the cap height sits close enough to
+     the top of the box that a tight mask nicks the ascenders. */
+  padding-top: 0.06em;
+  margin-top: -0.06em;
+}
+
+.landing h1 .line.dim {
+  margin-top: 0.04em;
+}
+
+/* ---------- "new here?" under the button ---------- */
+/*
+ * Sits directly beneath the payment button because that is where somebody who
+ * cannot use it yet is already looking. Deliberately quiet — a second filled
+ * button here would split the decision the hero exists to make.
+ */
+/* Joins the staggered entrance, between the button and the cue, so the hero
+   still reads in one pass from headline to invitation to scroll. */
+.landing .panel-hero .first-time {
+  opacity: 0;
+  translate: 0 20px;
+  transition:
+    opacity 0.8s ease 0.58s,
+    translate 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.58s;
+}
+.landing .panel-hero.is-in .first-time {
+  opacity: 1;
+  translate: 0 0;
+}
+
+/* The cue waits until the line above it has settled. */
+.landing .panel-hero.is-in .cue {
+  animation: cue 2.4s ease-in-out 1.55s infinite;
+}
+.landing .panel-hero .cue {
+  margin-top: 46px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing .panel-hero .first-time {
+    opacity: 1;
+    translate: 0 0;
+    transition: none;
+  }
+}
+
+/* ---------- "new here?" ---------- */
+/*
+ * A sentence, not a control. Anything with a border, a fill or a button shape
+ * gets read before the button above it -- which inverts the hero's whole job.
+ * So this is a little larger than body text and otherwise completely quiet:
+ * noticed on the way down to the button, never instead of it.
+ */
+/* Two lines: the invitation, and the small print under it. Splitting them
+   lets the first sit large enough to be seen on the way past while the second
+   stays a footnote -- one line at a single size would have to be either too
+   quiet to notice or loud enough to rival the button above. */
+.landing .panel-hero .first-time {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 28px;
+  max-width: 46ch;
+  text-align: center;
+}
+
+.first-time-lead {
+  font-size: clamp(16px, 1.9vw, 18px);
+  line-height: 1.5;
+  color: var(--body);
+}
+
+.first-time-note {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--faint);
+}
+
+.landing .panel-hero .first-time .link {
+  font-size: inherit;
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+}
+.landing .panel-hero .first-time .link:hover:not(:disabled) {
+  border-bottom-color: var(--accent);
+}
+
+/* Arrives after the button, so the eye reaches it second. */
+.landing .panel-hero .first-time {
+  opacity: 0;
+  translate: 0 20px;
+  transition:
+    opacity 0.8s ease 0.58s,
+    translate 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.58s;
+}
+.landing .panel-hero.is-in .first-time {
+  opacity: 1;
+  translate: 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing .panel-hero .first-time {
+    opacity: 1;
+    translate: 0 0;
+    transition: none;
+  }
+}
+
+
+/* ================= account portal ================= */
+/*
+ * The same vocabulary as the landing page: hairline borders, one accent used
+ * sparingly, and figures allowed to be large because nothing around them is.
+ */
+
+/* ---------- header action ---------- */
+/* The one bordered control in a masthead: sign out on the account portal,
+   the till/payments toggle on the merchant one. */
+
+.header-action {
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.header-action:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+/* ---------- who you are ---------- */
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.profile-glyph {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.profile-glyph svg {
+  width: 24px;
+  height: 24px;
+}
+
+.profile h2 {
+  font-size: 19px;
+  letter-spacing: -0.025em;
+}
+.profile p {
+  margin-top: 3px;
+  font-size: 13.5px;
+  color: var(--faint);
+}
+
+/* ---------- the two figures ---------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  /* The gap is the divider, so the pair reads as one object rather than two
+     cards that happen to be adjacent. */
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 20px 22px;
+  background: var(--surface);
+}
+.stats strong {
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  line-height: 1.1;
+}
+.stats span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* ---------- a titled block ---------- */
+
+.panel-block {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding-top: 26px;
+}
+
+.block-head h3 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.block-head p {
+  margin-top: 4px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--faint);
+}
+
+/* ---------- settings list ---------- */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+}
+.setting + .setting {
   border-top: 1px solid var(--line);
 }
-.site-foot strong {
+
+.setting strong {
   display: block;
-  font-size: 15px;
-  font-weight: 660;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
 }
-.site-foot em {
+.setting > div > span {
   display: block;
-  font-style: normal;
+  margin-top: 2px;
   font-size: 12.5px;
-  color: var(--muted);
+  line-height: 1.5;
+  color: var(--faint);
 }
-.site-foot nav {
+
+.setting-value {
   display: flex;
-  gap: 18px;
+  align-items: center;
+  gap: 10px;
+  flex: none;
 }
-.site-foot nav a {
-  color: var(--muted);
-  font-size: 13.5px;
-  text-decoration: none;
+.setting-value > span {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
 }
-.site-foot nav a:hover {
-  color: var(--brand);
-}
-.site-foot small {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* ---------- landing: responsive ---------- */
-
-@media (min-width: 640px) {
-  .trust-strip {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .steps-row,
-  .grid-4,
-  .grid-2 {
-    grid-template-columns: repeat(2, 1fr);
-  }
+/* Nothing is configured, and the value should not pretend otherwise by
+   sitting at full contrast next to the ones that are. */
+.setting-value > span.unset {
+  color: var(--faint);
+  font-weight: 500;
 }
 
-@media (min-width: 900px) {
-  .hero {
-    grid-template-columns: 44fr 56fr;
-    gap: 52px;
-  }
-  .trust-strip {
-    grid-template-columns: repeat(4, 1fr);
-  }
-  .steps-row {
-    grid-template-columns: repeat(3, 1fr);
-  }
-  .grid-4 {
-    grid-template-columns: repeat(4, 1fr);
-  }
-  .landing {
-    gap: 96px;
-  }
-  .site-foot {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-  /* The privacy stages go across once there is room to hold a label under
-     each one. Below this they stay stacked, because a row of five unlabelled
-     icons explains nothing. */
-  .privacy-flow {
-    flex-direction: row;
+.soon {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+@media (max-width: 400px) {
+  .setting {
+    flex-direction: column;
     align-items: flex-start;
-    justify-content: center;
-  }
-  .privacy-flow li {
-    flex-direction: row;
-    align-items: flex-start;
-  }
-  .privacy-node {
-    width: 132px;
-  }
-  .privacy-arrow {
-    transform: none;
-    padding: 0 4px;
-    margin-top: 13px;
+    gap: 8px;
   }
 }
 
-@media (min-width: 1060px) {
-  .steps-row {
-    grid-template-columns: repeat(6, 1fr);
-  }
-  .step-card p {
-    font-size: 12.5px;
-  }
+/* ---------- an inline text action ---------- */
+/*
+ * For a route that has to be reachable but must not read as a choice equal to
+ * the form it sits inside — "use your password instead", "set up access".
+ */
+.linkish {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.linkish:hover {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* A ledger row that carries an action rather than opening one. */
+.ledger-row .approve {
+  width: auto;
+  flex: none;
+  padding: 9px 18px;
+  font-size: 14px;
 }

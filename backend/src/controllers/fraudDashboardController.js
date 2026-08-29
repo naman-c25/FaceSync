@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { ApiError } from '../middleware/errorHandler.js';
 import { FraudFlag } from '../models/FraudFlag.js';
+import { Merchant } from '../models/Merchant.js';
 import { VerificationLog } from '../models/VerificationLog.js';
 import { RULES } from '../rules/index.js';
 
@@ -135,6 +136,48 @@ async function review(req, res, status) {
   await flag.save();
 
   res.json({ flag: summarise(flag) });
+}
+
+/**
+ * Shops that have signed up and cannot scan yet.
+ *
+ * Approving one used to mean a command line, which put it out of reach of
+ * whoever happens to be holding a phone when a shop signs up. The decision
+ * itself is unchanged -- an admin still makes it -- it just has a button now.
+ */
+export async function pendingMerchants(_req, res) {
+  const merchants = await Merchant.find({ verified: false, active: true })
+    .select('merchantId name email createdAt')
+    .sort({ createdAt: -1 })
+    .limit(50)
+    .lean();
+
+  res.json({
+    merchants: merchants.map((m) => ({
+      id: String(m._id),
+      merchantId: m.merchantId,
+      name: m.name,
+      email: m.email,
+      signedUpAt: m.createdAt,
+    })),
+  });
+}
+
+/** Let a shop's terminal start looking at customers. */
+export async function verifyMerchant(req, res) {
+  const shop = await Merchant.findById(req.params.id);
+  if (!shop) throw new ApiError(404, 'No such merchant', 'not_found');
+
+  if (shop.verified) {
+    // Not an error worth failing on -- two admins pressing the same button is
+    // the same outcome either way.
+    return res.json({ merchantId: shop.merchantId, verified: true });
+  }
+
+  shop.verified = true;
+  await shop.save();
+
+  return res.json({ merchantId: shop.merchantId, verified: true });
 }
 
 export const clear = (req, res) => review(req, res, 'cleared');

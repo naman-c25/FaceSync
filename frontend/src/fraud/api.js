@@ -33,6 +33,11 @@ export const fraudApi = {
 
   detail: (id) => request('GET', `/api/fraud/flags/${id}`),
 
+  // Shops waiting to be allowed to point a camera at customers.
+  pendingMerchants: () => request('GET', '/api/fraud/merchants/pending'),
+  approveMerchant: (id) =>
+    request('POST', `/api/fraud/merchants/${id}/verify`),
+
   clear: (id, note) => request('POST', `/api/fraud/flags/${id}/clear`, { note }),
   confirm: (id, note) =>
     request('POST', `/api/fraud/flags/${id}/confirm`, { note }),
