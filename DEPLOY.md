@@ -132,6 +132,33 @@ Every liveness frame travels browser → Node → Python → back. Splitting the
 across two hosts adds a network hop to each of the 20-30 frames in a single
 scan, and the frame rate is what blink detection depends on.
 
+### What is pinned, and what floats
+
+**Pinned:** every Python package (`requirements.txt`, 60 exact versions,
+transitive ones included) and every npm package (both lockfiles, installed with
+`npm ci`). These were unpinned until an unpinned resolution handed CI a newer
+Starlette than the laptop had and the test client stopped importing — and the
+deployed image builds from the same file, so an unpinned rebuild during a demo
+week could change what ships with no commit behind it.
+
+**Floating, deliberately:** the base images, `python:3.12-slim` and
+`node:22-slim`. Pinning those by digest would make the build bit-for-bit
+reproducible and stop OS security patches arriving — openssl and glibc included,
+on a system that handles biometric data. It would also freeze whatever CVEs the
+base carried on the day it was pinned, so a scanner would report *more* over
+time, not fewer.
+
+The risk floating leaves is a base image that changes out from under the build —
+which is real here, since the image installs specific native libraries by name
+(`libgl1`, `libegl1`) and Debian has renamed such packages between releases.
+That risk is covered by the `image builds` job in CI: it builds this Dockerfile
+on every push, so a broken base is caught before Railway deploys it rather than
+after.
+
+`.github/dependabot.yml` keeps the pinned halves from rotting. It deliberately
+does **not** include the Docker ecosystem, because moving to Python 3.13 or Node
+24 is a decision to make on purpose rather than to be nudged into weekly.
+
 ---
 
 ## Alternatives

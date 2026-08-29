@@ -30,6 +30,38 @@ packages. It exists because they were undeclared: the suite passed locally on an
 first CI run on a clean machine failed at import. That is the bug a CI job is
 for.
 
+## Pinned dependencies, and how to move one
+
+Both requirement files pin exact versions, transitive packages included. They
+were unpinned until an unpinned resolution handed CI a newer Starlette than the
+laptop had and the test client stopped importing — and the same file builds the
+deployed image, so an unpinned rebuild during a demo week can change what ships
+with no commit behind it.
+
+The pins are resolved for **cp312 on linux**, which is what the Dockerfile and
+CI run. 53 of the 60 resolve identically on the local Windows 3.14 environment
+and the other seven differ by a patch release, so one file serves both rather
+than a lock only the container can install.
+
+To move a version deliberately, edit the direct dependency, then regenerate the
+transitive half against the real target:
+
+```bash
+pip install --dry-run --ignore-installed --report report.json \
+    --python-version 3.12 --implementation cp --abi cp312 \
+    --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
+    --platform manylinux_2_28_x86_64 --platform any \
+    --only-binary=:all: --target /tmp/throwaway \
+    -r requirements-dev.txt
+```
+
+`--only-binary=:all:` is the part that matters: it fails rather than falling
+back to building from source, so a version with no wheel for the deployment
+target is caught here instead of in a Docker build.
+
+Then run `pytest` — the suite is what says the new versions actually work, not
+the resolver.
+
 ## Tune the thresholds before you trust anything
 
 The defaults in `config.py` are starting points from the literature, not

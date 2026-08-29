@@ -1,15 +1,26 @@
-# Test-only dependencies. Not installed into the deployed image.
+# Test-only dependencies, pinned the same way as requirements.txt.
+#
+# Kept separate so the deployed image does not carry test packages, and so
+# `pip install -r requirements.txt` inside the Dockerfile stays exactly what
+# ships.
 #
 # These were undeclared until CI ran on a clean machine and found it. Locally
 # the suite passed because `httpx` had arrived as somebody else's transitive
-# dependency and happened to be sitting in the virtualenv — which is exactly
-# the failure a CI job exists to catch, and the reason it is worth having.
+# dependency and happened to be sitting in the virtualenv — which is precisely
+# the failure a CI job exists to catch.
 
 -r requirements.txt
 
-pytest
+pytest==9.1.1
 
 # `fastapi.testclient` is `starlette.testclient`, which does its HTTP over
 # httpx. Starlette 1.6 looks for `httpx2` first and falls back to `httpx` with
 # a deprecation warning, so the new name is the one to depend on.
-httpx2
+httpx2==2.12.0
+
+# --- transitive, pinned for reproducibility --------------------------------
+httpcore2==2.12.0
+iniconfig==2.3.0
+pluggy==1.6.0
+pygments==2.21.0
+truststore==0.10.4

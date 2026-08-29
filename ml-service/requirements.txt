@@ -1,26 +1,84 @@
-# ML service dependencies — Python 3.14 compatible.
+# ML service dependencies, pinned.
+#
+# Every version here was resolved for cp312 on linux — the Python the
+# Dockerfile and CI both run — and checked against the local Windows 3.14
+# development environment, where 53 of the 60 resolve identically and the
+# remaining seven differ only by a patch release. So one pinned file serves
+# both, rather than a lock that only the container can install.
+#
+# Pinned because they were not, and it broke: an unpinned resolution gave CI a
+# newer Starlette than the laptop had, and the test client stopped importing.
+# The deployed image builds from this file, so an unpinned rebuild the week of
+# a demo can change what ships without a commit.
+#
+# To move a version deliberately, edit the direct dependency below and
+# regenerate — see ml-service/README.md.
 #
 # NOTE: DeepFace/TensorFlow are deliberately NOT used. TensorFlow publishes no
 # wheel for Python 3.14. InsightFace runs the same ArcFace architecture on
 # ONNX Runtime instead: smaller, faster to start, and no TF dependency tree.
 
-fastapi
-uvicorn[standard]
-python-multipart
-pydantic
-pydantic-settings
-
-numpy
-opencv-python
-pillow
-
-# Face detection + 512-d ArcFace embeddings (buffalo_l model pack)
-insightface
-onnxruntime
-
-# 468-point Face Mesh + iris landmarks — drives EAR and gaze liveness
-mediapipe
-
-# Presentation-attack detection: the SVM and the grouped cross-validation
-# in tools/train_pad.py. Not imported by the service itself.
-scikit-learn>=1.9
+# --- direct dependencies ---------------------------------------------------
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+pydantic==2.13.5
+pydantic-settings==2.15.0
+numpy==2.5.2
+opencv-python==5.0.0.93
+pillow==12.3.0
+insightface==1.0.1
+onnxruntime==1.29.0
+mediapipe==1.0.1
+scikit-learn==1.9.0
+# --- transitive, pinned for reproducibility --------------------------------
+# Nothing below is imported by this service directly. It is here so that a
+# rebuild resolves to the same tree rather than to whatever is newest.
+absl-py==2.5.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+colorama==0.4.6
+contourpy==1.3.3
+cycler==0.12.1
+flatbuffers==25.12.19
+fonttools==4.63.0
+h11==0.16.0
+httptools==0.8.0
+idna==3.19
+imageio==2.37.4
+joblib==1.5.3
+kiwisolver==1.5.1
+lazy-loader==0.5
+matplotlib==3.11.1
+ml_dtypes==0.6.0
+narwhals==2.25.0
+networkx==3.6.1
+onnx==1.22.0
+opencv-contrib-python==5.0.0.93
+packaging==26.3
+protobuf==7.36.0
+pycparser==3.0
+pydantic_core==2.46.5
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.3
+pyyaml==6.0.3
+requests==2.34.2
+scikit-image==0.26.0
+scipy==1.18.1
+six==1.17.0
+sounddevice==0.5.6
+starlette==1.6.0
+threadpoolctl==3.6.0
+tifffile==2026.8.23
+tqdm==4.70.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.7.0
+watchfiles==1.2.0
+websockets==17.1
