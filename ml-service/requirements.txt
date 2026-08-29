@@ -63,7 +63,7 @@ opencv-contrib-python==5.0.0.93
 packaging==26.3
 protobuf==7.36.0
 pycparser==3.0
-pydantic_core==2.46.5
+pydantic_core==2.48.0
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
