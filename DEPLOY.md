@@ -155,9 +155,16 @@ That risk is covered by the `image builds` job in CI: it builds this Dockerfile
 on every push, so a broken base is caught before Railway deploys it rather than
 after.
 
-`.github/dependabot.yml` keeps the pinned halves from rotting. It deliberately
-does **not** include the Docker ecosystem, because moving to Python 3.13 or Node
-24 is a decision to make on purpose rather than to be nudged into weekly.
+**Versions move by hand, on purpose.** Automated dependency updates were tried
+and removed. A fully pinned `requirements.txt` and single-package automated
+bumps do not mix: the bot cannot tell a dependency somebody chose from a
+dependency of a dependency, so it proposed `pydantic-core` on its own while
+`pydantic` pins that version exactly, and the result would not install. Doing it
+properly needs a lock format that updates as one unit — uv or pip-tools — which
+is worth doing later and was not worth doing the week of a deadline.
+
+So a version changes when someone changes it, with the regeneration command in
+`ml-service/README.md`, and the test suite decides whether it stays.
 
 ---
 
