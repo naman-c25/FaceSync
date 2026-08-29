@@ -18,9 +18,17 @@ python app.py                   # serves on 127.0.0.1:8001
 Interactive API docs at `http://127.0.0.1:8001/docs`.
 
 ```bash
+pip install -r requirements-dev.txt   # requirements.txt plus the test packages
+
 pytest                  # 174 tests
-pytest -m "not slow"    # skip the ones that load real models (~1s)
+pytest -m "not slow"    # 158, skipping the ones that load real models
 ```
+
+`requirements-dev.txt` is separate so the deployed image does not carry test
+packages. It exists because they were undeclared: the suite passed locally on an
+`httpx` that was only present as somebody else's transitive dependency, and the
+first CI run on a clean machine failed at import. That is the bug a CI job is
+for.
 
 ## Tune the thresholds before you trust anything
 
