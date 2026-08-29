@@ -88,13 +88,84 @@ python tools/kiosk_demo.py verify --merchant shop-1
 ## Tests
 
 ```bash
-cd ml-service && pytest         # 116
-cd backend && npm test          # 74
+cd ml-service && pytest         # 174  (158 without the model-loading ones)
+cd backend && npm test          # 151  (needs MongoDB; the ML service is stubbed)
+cd frontend && npm run lint     # rules-of-hooks, mainly
 ```
+
+All of it runs on every push — `.github/workflows/ci.yml` builds the Docker
+image too, since that image is the deployed artefact and a Dockerfile that
+stopped building would otherwise surface only as a failed deploy.
 
 The liveness state machine is tested against synthetic landmark geometry, so
 every spoof scenario — a held photo, a replayed blink, a head turned at rest —
 runs without a camera.
+
+## Every dataset used, and what for
+
+Five, and none of them were trained on. **No model here is trained or
+fine-tuned** — the weights are pretrained and the work is in the thresholds and
+the rules around them.
+
+**1. Labeled Faces in the Wild (LFW), funneled** — 13,233 photos of 5,749
+people, public research data.
+
+| used for | how much | why |
+|---|---|---|
+| the 1:N benchmark | 5,486 identities embedded, 5,182 in the measured gallery | eight friends cannot test 1:N; system FMR grows as `N x` per-comparison FMR |
+| loaded into the real database | 2,000 identities | measure the actual code path, encryption and all, not a script |
+| the bucketing experiment | 5,486 embeddings | needed a gallery wide enough for the pruning test to mean something |
+| PAD domain-shift check | 120 captures of real people | see whether the anti-spoof models call strangers' cameras fake. 9.2% were |
+
+*Why not an Indian face dataset* — no free one of this size with multiple dated
+photos per person was found. This is the honest gap: LFW is mid-2000s
+English-language press photography, heavily skewed toward white American men,
+and error rates vary by demographic group. A threshold validated here is not
+thereby validated for the people this is built for.
+
+*Why the benchmark rows cannot be paid* — nobody in a research dataset agreed to
+be in a payment system. They sit in the candidate pool (that is the point) but
+carry `source: 'benchmark'`, have no PIN, and two code paths refuse them by
+name. See `benchmark-data/README.md`.
+
+**2. Silent-Face-Anti-Spoofing reference images** — 8 labelled images shipped by
+the model authors: print attacks, screen attacks, live faces. Used once, to
+check the PAD pipeline end to end. **Not used to set the threshold** — 8 images
+cannot calibrate anything. That is what the 120 LFW captures were for, and even
+those are a domain-shift check rather than a calibration.
+
+**3. Our own captures — the only data from the real cameras.** 17 enrolled
+users, 290 verification attempts over 6.7 days across 14 terminals. Small, and
+the most relevant thing here.
+
+| used for | how much |
+|---|---|
+| blink thresholds | 5 people, open-eye EAR 0.316-0.418 |
+| challenge-mode cost | 86 attempts — median 8.0s, 1 in 5 failed |
+| the continuity threshold | 28 genuine sessions, 0.481-0.984 |
+| fraud rule replay | all 290 logs |
+
+*Why it is not the accuracy number* — 9 of the 17 have been scanned once or
+never. Their scores are not evidence yet, and the README says so where they
+appear.
+
+**4. The six-person group photo bundled with InsightFace** — 15 impostor pairs.
+The first threshold sanity check, before LFW was set up: highest impostor pair
+0.194, mean 0.034, against a 0.45 threshold.
+
+*Why it is not quoted as accuracy.* 15 pairs from one photograph is a smoke
+test. It said the threshold was not obviously wrong, which is all it can say.
+LFW replaced it.
+
+**5. Pretrained model weights** — `buffalo_l` (SCRFD + ArcFace), MediaPipe
+FaceLandmarker, two MiniFASNets. Downloaded, converted to ONNX, and run as-is.
+`allowed_modules` is limited to detection and recognition, so the gender, age
+and dense-landmark models in the bundle never load or run.
+
+*Why nothing was trained.* There is no data here worth training on. 17 users is
+not a training set, and there is no real fraud data at all — a trained fraud
+model built on invented fraud would be theatre. The fraud layer is rules, and
+says so.
 
 ## What has been measured
 
@@ -174,7 +245,7 @@ at a kiosk.
 ### The real system, with real people in it
 
 2,000 of those faces were loaded into the actual database, encrypted through the
-actual code path, and the nine real enrolled users measured against them
+actual code path, and the nine real users enrolled at the time measured against them
 (`backend/src/scripts/measureAccuracy.js`):
 
 ```
@@ -282,6 +353,37 @@ eye rather than being a fixed number.
 Every attempt is logged with both scores, the thresholds in force, and the full
 liveness signals, so these curves are drawn from real attempts rather than
 estimated.
+
+### The fraud rules, replayed over the real log
+
+`npm run fraud:replay -- --sweep` re-runs every rule over all 290 logs at every
+threshold, importing the rules themselves so the numbers cannot drift from the
+shipped code. Shipped thresholds marked `*`:
+
+```
+rule                threshold  matching rows  firings  incidents
+pin_velocity             3 *             4        0        0
+spoof_burst              2              28       18        7
+spoof_burst              3 *            28       11        6
+spoof_burst              4              28        5        3
+liveness_velocity        3              48        9        6
+liveness_velocity        5 *            48        1        1
+liveness_velocity        6              48        0        0
+```
+
+Reading it honestly, because the log is our own testing:
+
+- **`spoof_burst` is hitting real attacks.** Those 28 rows are deliberate photo
+  and phone-screen attacks. Its 6 incidents are true positives.
+- **`liveness_velocity` is misfiring.** Nobody was attacking during those 48
+  rows — they are ordinary failed scans in bad light. Threshold 5 was picked to
+  bring that to a single incident; 3 would raise six false ones.
+- **`pin_velocity` has never fired.** Refused PINs were not logged until this
+  rule needed them, so it starts with no history. 4 rows is not a test of
+  anything, and the rule is unproven rather than proven quiet.
+
+Liveness failures are 26% of all attempts, which is the largest single failure
+kind and mostly light. That is why the threshold sits where it does.
 
 ## Liveness: what is running, and what that buys
 
@@ -433,7 +535,22 @@ is free and takes two minutes — the Node service serves the built kiosk, so on
 tunnel exposes the whole app on one URL. For something that stays up without a
 laptop, the root `Dockerfile` builds all three into one image.
 
-It currently runs on Railway, and two things about that were not obvious:
+**The live URL is slower than a laptop, and that is the free tier.** A free
+container gets a slow, shared, thread-capped CPU, and all the ML runs on it. The
+same 12-frame batch:
+
+```
+laptop, ML service warm          149 ms
+deployed on Railway            ~1800 ms      about 12x slower
+```
+
+Most of that is CPU; some is the round trip to the server, which was not
+separated out. Scans stay usable — a few seconds instead of under a second — but
+any latency figure taken from the live URL describes a free CPU, not this
+system. Railway was chosen because it is free; `DEPLOY.md` has the comparison
+against Cloud Run and Oracle.
+
+Two other things about that deployment were not obvious:
 
 - **One replica, always.** Liveness sessions live in the Python process's
   memory, not in the database, and one verification is 20-30 separate requests
@@ -499,9 +616,9 @@ take the id the real one would want.
 - **Speaker verification.** Dropped for the reason above, not deferred.
 - **Two of the four fraud rules.** "Many distinct people at one terminal" and
   "a spike in ambiguous results" were specified and left unbuilt. Replayed over
-  205 real logs they fire zero times at every threshold tried — there are
-  thirteen enrolled users and not one `ambiguous` outcome in the whole file.
-  Shipping them so the count reads four would be the same dishonesty as the
+  290 real logs they fire zero times at every threshold tried — there are 17
+  enrolled users and not one `ambiguous` outcome in the whole file. Shipping
+  them so the count reads four would be the same dishonesty as the
   trained-model claim above.
 - **Self-service password reset for merchants.** A customer can prove
   themselves with a PIN and a face. A shop account has neither, so anything
@@ -512,6 +629,52 @@ take the id the real one would want.
 - **A trained anomaly model.** The same `VerificationLog` rows become labelled
   training data once there is real volume. That is the upgrade path, not a
   missing piece.
+
+## Where this sits against Indian regulation
+
+Not a compliance claim, and not a legal review. It runs in Razorpay **test
+mode**, moves no real money, and holds data only from people who were asked in
+person — so nothing here is under obligation yet. What follows is which design
+decisions were made with the rules in mind, and what a real deployment would
+still owe.
+
+### DPDP Act 2023
+
+Biometric data is personal data under the Act. Five of its duties have a
+matching design decision, and it is worth naming which:
+
+| the duty | what the system does |
+|---|---|
+| notice and consent | a consent screen before the camera opens, not a checkbox in a footer — it says "512 numbers, encrypted, no photo kept", which is checkable |
+| purpose limitation | the embedding is used to identify at a till and for nothing else. Benchmark rows cannot be charged, by name, in two code paths |
+| data minimisation | no phone number, no address, no raw image, ever. 1:N means nothing needs a contact detail to look someone up, and a field that does not exist cannot leak |
+| right to erasure | `DELETE /api/user/me` removes the face record and the probe embeddings kept on failed attempts, and severs — rather than deletes — the payment history |
+| security safeguards | AES-256-GCM with key versioning, scrypt for passwords and PINs, and no raw images at rest |
+
+**What a real deployment would still owe**, and does not have: a named
+grievance officer, a stated retention period (sessions expire on a TTL, but
+enrolled embeddings are kept indefinitely), a breach-notification path to the
+Data Protection Board, and consent records that survive somebody clearing
+`localStorage`. These are process, not code, which is why they are listed
+rather than half-built.
+
+### Two-factor authentication
+
+A payment here needs **two factors from two different categories**: the face
+(inherence) and a four-digit PIN (knowledge). Neither works alone — the face
+cannot authorise a charge, and the PIN is useless without being recognised
+first.
+
+That separation is enforced rather than assumed, which is why both recovery
+routes deliberately avoid the face: a forgotten password is reset with the
+registered name and the PIN, and a forgotten PIN is changed with the account
+password. A face that could reset either would collapse the two factors into
+one.
+
+The PIN is four digits, which is only safe because the attempts run out — three
+refusals and the record locks. That lockout is shared by every path that checks
+a PIN, including password reset, so the reset route cannot be used to get around
+it.
 
 ## Honest limits
 

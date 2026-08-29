@@ -61,15 +61,35 @@ const schema = z.object({
   // finite: these tokens cannot be revoked before they expire.
   USER_SESSION_HOURS: z.coerce.number().positive().default(72),
 
-  // Comma-separated origins allowed to call this API from a browser, or "*"
-  // to allow any. Deployed, the frontend is on a different origin, so without
-  // this every request fails the preflight.
+  // Comma-separated origins allowed to call this API from a browser. Empty by
+  // default, which is the right default for the way this actually deploys:
+  // the Node service serves the built frontend itself, so every request is
+  // same-origin and needs no CORS header at all.
   //
-  // A wildcard is tolerable here only because the API uses no cookies and no
-  // browser-managed credentials — session ids travel in the request body, so
-  // another site loading this API in a user's browser gains nothing it could
-  // not get by calling the API directly. Set real origins in production.
-  CORS_ORIGINS: z.string().default('*'),
+  // "*" is still accepted, and is what a split deployment on an unknown
+  // frontend origin needs. It is tolerable only because the API uses no
+  // cookies and no browser-managed credentials — session ids and bearer
+  // tokens are sent by the page, so another site loading this API in a user's
+  // browser gains nothing it could not get by calling the API directly. It
+  // has to be asked for rather than inherited.
+  CORS_ORIGINS: z.string().default(''),
+
+  // How many reverse proxies sit in front of this process. Every platform in
+  // DEPLOY.md puts exactly one there, and without this Express reads the
+  // proxy's own address as the client's — which would file every request in
+  // the world under one rate-limit bucket and take the whole API down the
+  // first time anybody hit a limit.
+  //
+  // A number rather than `true`: trusting every hop lets a caller set
+  // X-Forwarded-For themselves and pick which bucket to spend.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(1),
+
+  // Off in the test suite, where 141 tests share one address and would
+  // otherwise start refusing each other. Never turn it off in a deployment.
+  RATE_LIMIT_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
 
   // Candidate pool narrowing. At demo scale everyone is a candidate; these are
   // the levers that keep the pool bounded as enrollment grows.

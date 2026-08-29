@@ -6,9 +6,10 @@ import {
   startEnrollment,
 } from '../controllers/enrollmentController.js';
 import { asyncRoute } from '../middleware/errorHandler.js';
+import { limit, sessionLimiter } from '../middleware/rateLimit.js';
 
 export const enrollmentRoutes = Router();
 
-enrollmentRoutes.post('/start', asyncRoute(startEnrollment));
+enrollmentRoutes.post('/start', limit(sessionLimiter), asyncRoute(startEnrollment));
 enrollmentRoutes.post('/capture', asyncRoute(captureSample));
 enrollmentRoutes.post('/finalize', asyncRoute(finalizeEnrollment));

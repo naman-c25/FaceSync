@@ -31,10 +31,25 @@ and published as a face-recognition benchmark.
 > Unconstrained Environments.* University of Massachusetts, Amherst,
 > Technical Report 07-49, October 2007.
 
-1,680 of those people have two or more photographs, which is what makes a
-genuine-pair measurement possible: one image becomes the stored identity, a
-second image taken on a different day becomes the probe. A benchmark that
-matched an image against itself would only be measuring arithmetic.
+People with two or more photographs are what make a genuine-pair measurement
+possible: one image becomes the stored identity, a second image from a different
+day becomes the probe. A benchmark that matched an image against itself would
+only be measuring arithmetic.
+
+**What the shipped files hold:**
+
+```
+gallery.jsonl    5,486 identities embedded, 1,481 of them with a held-out probe
+results.json     the measured run: gallery 5,182, genuine probes 1,181,
+                 strangers 300
+partial.jsonl      600 rows, a checkpoint from a shorter run
+pad-models/      the two MiniFASNets plus the 8 reference images the
+                 anti-spoof pipeline was checked against
+```
+
+The measured gallery is 5,182 rather than 5,486 because 300 probed identities
+are held out as strangers and a handful more were removed as dataset label
+errors — see below.
 
 ## What they are not
 
@@ -68,11 +83,45 @@ built for Indian customers. Face recognition error rates are known to vary by
 demographic group, and a threshold validated on this gallery is not thereby
 validated on that population.
 
-Both things are true and both should be said out loud: 2,000 LFW identities is a
+Both things are true and both should be said out loud: 5,182 LFW identities is a
 far better basis than 8 friends, and it is not a substitute for measuring on the
 population the system is for. The live enrollments collected from real users are
 still the more relevant dataset — they are just far too small to say anything
 about scale on their own.
+
+## Two dataset errors that had to be handled first
+
+Both are reported rather than quietly dropped, because ignoring them would have
+made the headline number look *worse* than the truth and fixing them silently
+would have made it untrustworthy.
+
+- **One person filed under two names.** Four identity pairs score above 0.85
+  against each other. Andrew Caldecott and Andrew Gilligan at 0.956 are
+  literally the same photograph.
+- **One folder holding two people.** Six probes match somebody else while
+  scoring near zero against their own row. Kate Capshaw's second photograph is
+  Steven Spielberg's.
+
+Counted as recognition failures, these would have reported 0.51% wrong-person
+instead of 0.00%. They are dataset noise, not model error, and `results.json`
+lists every one.
+
+## What was measured on this data, and what was not
+
+| done | why |
+|---|---|
+| 1:N identification at N = 5,182 | the only claim worth making about a system with no identifier |
+| the runner-up margin, with and without | it takes wrong-person from 0.17% to 0.00% — the whole argument for the two-condition rule |
+| 2,000 identities loaded into the real database | proves the encrypted code path, not just a script |
+| exact bucketed search over 5,486 embeddings | to find out whether pruning helps. It does not — 0 buckets skipped, 3.6-7.7x slower |
+| 120 captures through the anti-spoof models | a domain-shift check: 9.2% of real faces were called attacks |
+
+| not done | why |
+|---|---|
+| training or fine-tuning anything | LFW is a benchmark, not training data for this, and touching the weights would invalidate every number above |
+| an approximate vector index | the margin rule needs the true runner-up; an index that misses it reports a *wider* margin than exists, turning an `ambiguous` into a confident wrong name |
+| calibrating the PAD threshold here | 120 LFW captures are a different camera, different lighting, different era. Calibration needs real captures — `tools/silent_pad.py --data` |
+| quoting an FRR for real customers | 9 of 17 enrolled users have been scanned once or never |
 
 ## Reproducing it
 
@@ -84,11 +133,16 @@ about scale on their own.
     cd ../ml-service
     python tools/embed_dataset.py --root ../benchmark-data/lfw_funneled --report-only
 
-    # 3. embed it — one image per identity for the gallery, one held out as a probe
+    # 3. embed it — one image per identity for the gallery, one held out as a probe.
+    #    This is the run that produced the shipped gallery.jsonl: every identity
+    #    with a usable face, and a probe wherever a second photo exists.
     python tools/embed_dataset.py \
         --root ../benchmark-data/lfw_funneled \
         --out ../benchmark-data/gallery.jsonl \
-        --identities 2000 --min-images 2 --enroll-images 1 --probe-images 1
+        --min-images 1 --enroll-images 1 --probe-images 1
+
+    #    Add --identities 2000 for a smaller, much faster run. The numbers in the
+    #    root README are from the full one.
 
     # 4. measure 1:N on the model
     python tools/benchmark_1n.py \

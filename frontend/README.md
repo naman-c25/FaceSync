@@ -1,7 +1,42 @@
-# Frontend — the kiosk
+# Frontend — four apps, one stylesheet
 
 React + Vite. Mobile-first, because everyone you share the link with will open
 it on a phone.
+
+## The four surfaces
+
+Split by path, not folded together. Nothing customer-facing should carry code
+that charges money, and nothing should carry code that reads every terminal's
+traffic.
+
+| path | who | what |
+|---|---|---|
+| `/` | anyone | landing page, and the kiosk pay flow |
+| `/user` | customer | sign in / sign up, payment settings, history |
+| `/merchant` | shop | sign in / sign up, till, payment history |
+| `/fraud` | admin | flag review, and approving shops |
+
+`/user` and `/merchant` are the routes. There were `/account` and `/till`
+aliases for a while; they were removed rather than kept, so there is one URL per
+surface.
+
+**Sign-up differs by side.** A shop needs name, email and password. A customer
+needs those plus a PIN plus a face scan — and if that face is already
+registered, they are told so and asked for its PIN instead of silently getting a
+second record.
+
+Shared pieces live in `src/components/`: `Wordmark.jsx` and `SettingRow.jsx` are
+used by all four so the surfaces stay visually identical.
+
+**Scrolling.** The landing page uses Lenis for momentum scrolling
+(`useSmoothScroll.js`), with a try/catch fallback to native scroll if it fails to
+load. Scroll progress is written to CSS custom properties (`--scroll`, `--p`)
+rather than React state, so a scroll does not re-render the tree.
+
+**Watch out for unscoped CSS.** One stylesheet across four apps means a generic
+selector reaches further than intended. Landing-page `.steps` and `.card` rules
+once overrode the camera's liveness dots and the kiosk cards. Landing styles are
+now scoped under `.landing`.
 
 ## Running locally
 
@@ -47,37 +82,40 @@ Both hand back an HTTPS URL.
 
 ## Deploying
 
-Four pieces, and only one of them is awkward.
+**All three services ship as one image.** The root `Dockerfile` builds the
+frontend into the Node service and runs Python alongside it, so there is one
+URL, no CORS, and no `VITE_API_URL` to set. `DEPLOY.md` has the detail.
 
-| piece | where | notes |
-|---|---|---|
-| Frontend | Vercel, Netlify, Cloudflare Pages | static build, HTTPS by default, free |
-| MongoDB | MongoDB Atlas | free tier is 512MB — far more than enough |
-| Backend | Render, Railway, Fly.io | small; needs `ENCRYPTION_KEY` and `MONGODB_URI` |
-| ML service | Railway, Cloud Run, HF Spaces | the awkward one — see below |
+```bash
+npm run build:serve    # build straight into the backend's static directory
+```
 
-Build the frontend against a deployed backend:
+Splitting the frontend onto Vercel and the API elsewhere would work, but every
+liveness frame travels browser → Node → Python → back, and splitting adds a hop
+to each of the 20-30 frames in one scan.
+
+If you do split it:
 
 ```bash
 VITE_API_URL=https://your-backend.example.com npm run build
 # dist/ is what you upload
 ```
 
+...and set `CORS_ORIGINS` on the backend to the frontend's origin rather than
+leaving the `*` default.
+
 Which shop an attempt is logged against is decided by the server, not by the
 page: the kiosk is always booked to `KIOSK_MERCHANT_ID` and a till to whatever
 its token says. A terminal that could name its own shop was how an unapproved
 one used to scan customers anyway.
 
-### The ML service is the constraint
+### The free tier is slower, and users will notice
 
-It loads InsightFace and MediaPipe and wants roughly a gigabyte of memory. A
-512MB free tier will not run it. `Dockerfile` bakes the models into the image
-so a cold start does not begin with a 300MB download — without that, the first
-visitor after the service sleeps waits it out.
-
-Whatever you pick, set the backend's `ML_SERVICE_URL` to it, and set
-`CORS_ORIGINS` on the backend to the frontend's origin rather than leaving the
-`*` default.
+All the ML runs on the server's CPU. On a free container that CPU is slow and
+shared, so **a scan on the live URL takes noticeably longer than on a laptop** —
+the same 12-frame batch is 149ms locally and about 1800ms deployed. The UI is
+built for it: frames go out one at a time, the progress state is driven by
+responses rather than a timer, and nothing assumes a frame rate.
 
 **Cold starts are the thing that will embarrass you in a demo.** Free tiers
 sleep after inactivity and take 30-60 seconds to come back. Open the health
@@ -112,3 +150,13 @@ reassuring vagueness — "securely stored" tells nobody anything, while "512
 numbers, encrypted, no photo kept" is something a person can actually check.
 The choice is remembered in `localStorage` so returning visitors are not asked
 twice.
+
+**A failed start left a dead camera panel.** When enrollment is entered with
+details already filled in, the form that renders error messages is skipped — so a
+failed `startEnrollment` showed nothing at all, just a camera that never came on.
+The preset path now sets the failed phase itself.
+
+**Anything boxed reads as a control.** The "not registered yet?" line on the
+landing page was tried as a bordered panel with an outlined button, and it pulled
+attention before the Pay button did. It is a plain sentence now. Hierarchy on
+this page comes from fill, not from borders.

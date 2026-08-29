@@ -7,10 +7,11 @@ import {
   submitFrame,
 } from '../controllers/verificationController.js';
 import { asyncRoute } from '../middleware/errorHandler.js';
+import { limit, sessionLimiter } from '../middleware/rateLimit.js';
 
 export const verificationRoutes = Router();
 
-verificationRoutes.post('/start', asyncRoute(startVerification));
+verificationRoutes.post('/start', limit(sessionLimiter), asyncRoute(startVerification));
 verificationRoutes.post('/frame', asyncRoute(submitFrame));
 verificationRoutes.post('/match', asyncRoute(matchFace));
 

@@ -1,6 +1,7 @@
 {
   "name": "facepay-backend",
   "version": "0.1.0",
+  "license": "MIT",
   "description": "API and orchestration layer for the phone-less biometric payment system",
   "type": "module",
   "engines": {
@@ -15,9 +16,11 @@
     "fraud:replay": "node src/scripts/replayFraudRules.js"
   },
   "dependencies": {
-    "express": "^5.1.0",
-    "mongoose": "^8.20.0",
     "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "mongoose": "^8.20.0",
     "zod": "^4.1.12"
   }
 }

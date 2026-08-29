@@ -3,9 +3,11 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
+import helmet from 'helmet';
 
 import { config } from './config/index.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
+import { authLimiter, globalLimiter, sessionLimiter } from './middleware/rateLimit.js';
 import { enrollmentRoutes } from './routes/enrollmentRoutes.js';
 import { fraudRoutes } from './routes/fraudRoutes.js';
 import { merchantRoutes } from './routes/merchantRoutes.js';
@@ -50,7 +52,65 @@ export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
+
+  // Every host in DEPLOY.md terminates TLS at a proxy. Without this Express
+  // reports the proxy's address as the client's, and every rate limit below
+  // would be counted against one shared bucket.
+  app.set('trust proxy', config.TRUST_PROXY);
+
+  // This process serves the kiosk HTML as well as the API, so the headers a
+  // page needs are this service's responsibility rather than a CDN's.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          // No CDN, no analytics, no inline script: the build emits hashed
+          // files served from this origin, which is what makes the strict
+          // value affordable. This is the directive that matters — it is what
+          // stops injected markup from executing.
+          scriptSrc: ["'self'"],
+          // Inline styles are allowed, and are a far weaker vector. The
+          // landing page writes scroll progress into CSS custom properties on
+          // the element itself (`useSmoothScroll.js`), which is an inline
+          // style attribute; without this the page loads and never animates.
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          // `data:` because a captured frame is a data URL before it is sent;
+          // `blob:` for the camera preview, whose MediaStream the browser
+          // treats as a blob source.
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          mediaSrc: ["'self'", 'blob:', 'mediastream:'],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+          // Nothing here should ever be framed. A payment button inside
+          // somebody else's iframe is a click waiting to be stolen, and this
+          // is the modern spelling of X-Frame-Options.
+          frameAncestors: ["'none'"],
+        },
+      },
+      // Told to browsers only over HTTPS, and every deployment target here
+      // serves HTTPS. Harmless on plain-HTTP localhost, where it is ignored.
+      hsts: { maxAge: 15552000, includeSubDomains: true },
+      // The default is SAMEORIGIN, which would contradict `frame-ancestors
+      // 'none'` above and leave the weaker of the two answering older
+      // browsers. Nothing here should be framed at all, including by itself.
+      xFrameOptions: { action: 'deny' },
+      // The default is `same-origin`, which would stop the built page loading
+      // its own assets when the frontend is deployed separately.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      // A camera page has no reason to leak the URL it came from.
+      referrerPolicy: { policy: 'no-referrer' },
+    }),
+  );
+
   app.use(cors);
+
+  // A backstop against flooding, above anything real use produces. The
+  // narrower limits live on the routes that can be abused cheaply.
+  if (config.RATE_LIMIT_ENABLED) app.use(globalLimiter());
 
   // Frames arrive as base64 JPEG. A kiosk frame is well under a megabyte, but
   // the default 100kb limit would reject them, and an unbounded limit would

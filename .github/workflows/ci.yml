@@ -1,0 +1,146 @@
+# Runs the test suites this repository already had and nobody was running.
+#
+# Four jobs rather than one, so a red tick names what broke without anyone
+# opening the log. They are independent and run in parallel.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch makes the previous run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend tests
+    runs-on: ubuntu-latest
+
+    # The suite talks to a real MongoDB rather than a mock, because what it is
+    # checking includes TTL indexes, partial indexes and `select: false` --
+    # behaviour that lives in the database and that a mock would simply agree
+    # with.
+    services:
+      mongodb:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        working-directory: backend
+        run: npm ci
+
+      - name: Audit production dependencies
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=high
+
+      # tests/test.env supplies the throwaway key and points at the service
+      # above. No secret is needed, and none should ever be added here.
+      - name: Test
+        working-directory: backend
+        run: npm test
+
+  ml-service:
+    name: ml-service tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ml-service/requirements.txt
+
+      # insightface has no wheel for every version and falls back to building
+      # from source, which needs Cython and the numpy headers present *before*
+      # pip reaches it. Installing them first turns a confusing compile failure
+      # into an ordinary install.
+      - name: Install
+        working-directory: ml-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install cython numpy
+          pip install -r requirements.txt
+          pip install pytest
+
+      # The `slow` marker covers the tests that load the real ArcFace and
+      # MediaPipe weights -- 300MB fetched from a third party. Downloading that
+      # on every run would make CI slow and, worse, would go red whenever the
+      # host had a bad day, which trains people to ignore the tick. Everything
+      # else runs here; the model-loading tests run locally with a plain
+      # `pytest`.
+      - name: Test
+        working-directory: ml-service
+        run: pytest -q -m "not slow"
+
+  frontend:
+    name: frontend lint and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      # rules-of-hooks is the reason lint exists here: a hook below an early
+      # return is valid JavaScript that blanks the screen at runtime, and
+      # nothing in the build catches it.
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  docker:
+    name: image builds
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The deployed artefact is this image, so a Dockerfile that stopped
+      # building would otherwise only be discovered by a failed deploy. Built,
+      # not pushed -- nothing here has registry credentials.
+      #
+      # The build fetches ~300MB of model weights, so it is the slowest job.
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

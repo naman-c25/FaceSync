@@ -17,7 +17,24 @@ import globals from 'globals';
  * JavaScript.
  */
 export default [
+  // Flat config does not read .gitignore, so build output has to be named
+  // here or every run drowns in a few hundred errors from one minified
+  // bundle -- which is the same as having no linter, because nobody reads
+  // output that is always red.
+  { ignores: ['dist/**', '../backend/public/**', 'node_modules/**'] },
+
   js.configs.recommended,
+
+  // Build tooling runs in Node, not a browser.
+  {
+    files: ['vite.config.js', 'eslint.config.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+  },
+
   {
     files: ['src/**/*.{js,jsx}'],
     languageOptions: {
