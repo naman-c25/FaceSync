@@ -400,6 +400,27 @@ Each of these looked like a working system until something specific caught it.
   turned it on and eight of nine real users vanished at an unfamiliar merchant.
   Narrowing is now only the first tier — a miss widens to the whole gallery
   before anyone is turned away, and the audit row records which tier answered.
+- **A terminal could say which shop it was.** `/api/verify/start` read
+  `merchantId` from the request body, and the approval check added alongside
+  merchant sign-up read the same field — so the gate was asking the caller
+  which identity to check them against. A shop that had signed up and not been
+  approved simply sent the kiosk's id instead and scanned customers anyway,
+  learning the name of anyone who looked at its camera. The rule was already
+  written down one file away, in `requireMerchant`: a merchant id from a
+  request body is a value the caller chose, not an identity. The public route
+  now takes no shop id at all and books to a server-side constant; a till uses
+  an authenticated route and is booked to the shop in its token.
+
+- **A face could take away the PIN that protects it.** Re-enrolling overwrote
+  `pinHash` unconditionally — deliberately, because that was the way back for
+  people who enrolled while a PIN was optional. Nobody had followed the
+  consequence through: present somebody's live face, choose a new PIN, and the
+  second factor the face was supposed to need is yours. Records now seal when
+  their PIN is set, and a sealed one refuses the whole enrollment rather than
+  just the PIN, so a stranger cannot even refresh the stored signature.
+  Everything registered before this gets exactly one more pass through the old
+  route and seals behind it.
+
 - **Blinks would have gone undetected over a network.** Thresholds were frame
   counts, which only mean anything at a fixed frame rate. At the 5-8fps a
   browser achieves, a 200ms blink spans one frame. They are milliseconds now.
@@ -435,7 +456,12 @@ frame rate is what blink detection depends on.
 ## What each phase turned into
 
 - **Phase 1** — detection, passive liveness, anti-spoofing, 1:N identification.
-- **Phase 2** — a four-digit PIN, with a lockout after three refusals. The
+- **Phase 2** — a four-digit PIN, with a lockout after three refusals, and two
+  ways back that are deliberately not the face: a forgotten password is reset
+  with the registered name and the PIN through that same lockout, and a
+  forgotten PIN is changed with the account password. A face that could reset
+  either would make both decorative, which is the whole reason the PIN exists.
+  The
   spoken challenge that was planned alongside it was **dropped**: voice cloning
   defeats speaker verification, and unlike the face side there is no mature
   liveness answer for it (see ASVspoof). Face plus PIN already satisfies a
@@ -444,10 +470,29 @@ frame rate is what blink detection depends on.
 - **Phase 3** — Razorpay in test mode, wired to the auth result, producing a
   transaction record and a printable receipt.
 - **Phase 4** — rule-based flagging over `VerificationLog`, reviewed at
-  `/fraud` behind an admin account. Not a trained model, deliberately: there is
+  `/fraud` behind an admin account, which is also where a merchant that has
+  signed up gets approved. Not a trained model, deliberately: there is
   no real fraud data to train on, and training on invented fraud would be
   theatre. `npm run fraud:replay -- --sweep` re-runs every rule over the whole
   log and prints how often each would fire.
+
+## Merchants, and what signing up gets you
+
+Anyone can open a shop account, and it grants nothing on its own: the terminal
+it creates can sign in and read its own empty ledger, and that is all. Starting
+a scan needs approval, from `/fraud` or from
+`seedMerchant.js --verify <email>`.
+
+The split is not about money. Charging already needs the customer's own PIN, so
+a hostile shop cannot take anything. What an unapproved terminal could do is
+point a camera at a queue and be told everybody's name — which makes it a
+privacy surface before it is a payment one, and that is what approval gates.
+
+Every self-registered shop also gets a random suffix on its id
+(`corner-store-a3f9c1`). The id is stamped on every transaction and sits in
+every customer's `knownMerchants`, so it cannot be swapped later; deriving it
+from the name alone would let the first person to sign up as "Corner Store"
+take the id the real one would want.
 
 ## Not built, and why
 
@@ -458,6 +503,12 @@ frame rate is what blink detection depends on.
   thirteen enrolled users and not one `ambiguous` outcome in the whole file.
   Shipping them so the count reads four would be the same dishonesty as the
   trained-model claim above.
+- **Self-service password reset for merchants.** A customer can prove
+  themselves with a PIN and a face. A shop account has neither, so anything
+  automatic would come down to whoever controls the mailbox — and nothing here
+  sends mail. The sign-in screen points at a human instead, and resets happen
+  through `seedMerchant.js --reset-password`.
+
 - **A trained anomaly model.** The same `VerificationLog` rows become labelled
   training data once there is real volume. That is the upgrade path, not a
   missing piece.

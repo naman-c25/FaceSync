@@ -8,11 +8,18 @@
  * backlit person looks like, not an attacker.
  *
  * The threshold is measured rather than chosen, by `scripts/replayFraudRules.js`
- * over 205 real verification logs that were all our own legitimate testing.
+ * over real verification logs that were all our own legitimate testing.
  * Pooling every kind of failure together — the original proposal — fired 34
  * times. Counting only liveness failures, and only the ones that are not
- * deliberate attacks, the same three-in-five-minutes fires 7 times across 5
- * incidents. At five it fires once.
+ * deliberate attacks, the numbers over 289 logs are:
+ *
+ *     threshold 3   6 incidents
+ *     threshold 4   2
+ *     threshold 5   1     <- shipped
+ *     threshold 6   0
+ *
+ * Six would never misfire and would also never catch anything, which is why it
+ * is five. Re-run the script rather than trusting these; the log grows.
  *
  * Once is the honest state of it, not zero: this is the weakest of the three
  * rules and it exists to show a human a pattern, not to accuse anyone. Hence
