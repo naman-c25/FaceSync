@@ -109,6 +109,27 @@ export function createAnnouncer() {
 }
 
 /**
+ * The enrollment poses, said rather than read.
+ *
+ * Keyed by the exact wording the ML service sends, because that is what the
+ * screen shows and the two must not disagree about a direction. "Slightly" is
+ * dropped: it is a syllable of hedging in a sentence someone is trying to obey
+ * while holding still, and nobody turns their head hard when asked to turn it.
+ *
+ * Anything not listed is spoken as written, so a pose added to
+ * `ENROLLMENT_GUIDANCE` is still heard rather than silently skipped.
+ */
+const POSE_SPEECH = {
+  'Look straight at the camera': 'Look straight at the camera.',
+  'Turn your head slightly left': 'Turn your head left.',
+  'Turn your head slightly right': 'Turn your head right.',
+  // Not "chin up", which is encouragement rather than an instruction.
+  'Tilt your chin slightly up': 'Tilt your chin up.',
+  'Tilt your chin slightly down': 'Tilt your chin down.',
+  'Look straight ahead once more': 'Look straight ahead again.',
+};
+
+/**
  * What to say for an outcome, which is not always what is written on screen.
  *
  * Spoken text needs to be shorter and more direct: a sentence that reads well
@@ -132,4 +153,7 @@ export const SPOKEN = {
   paid: (amount, name) => `Paid. ${amount} rupees, ${name}.`,
   registered: (name) => `Registered. Welcome, ${name}.`,
   captureIn: (n) => `Capturing in ${n}`,
+
+  /** An enrollment pose, spoken. Falls back to the written wording. */
+  pose: (written) => (written ? (POSE_SPEECH[written] ?? written) : null),
 };

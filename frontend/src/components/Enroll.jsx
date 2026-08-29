@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, explain } from '../api.js';
-import { speech, SPOKEN } from '../speech.js';
+import { createAnnouncer, speech, SPOKEN } from '../speech.js';
 import { useCamera } from '../useCamera.js';
 import { CameraStage } from './CameraStage.jsx';
 
 const COUNTDOWN_MS = 2600;
+
+/**
+ * The pose being asked for at a given sample.
+ *
+ * Shared by the render and the announcement effect so the two cannot drift --
+ * hearing "turn your head left" while the screen says right is worse than
+ * saying nothing at all. The last entry repeats if more samples are collected
+ * than the server sent guidance for.
+ */
+function poseFor(session, collected) {
+  const guidance = session?.guidance ?? [];
+  return guidance[Math.min(collected, guidance.length - 1)] ?? 'Hold still';
+}
 
 /**
  * Guided enrollment: a few samples at different angles, fused server-side.
@@ -37,6 +50,10 @@ export function Enroll({ onDone, onCancel, presetName = '', presetPin = '' }) {
   const [countdown, setCountdown] = useState(3);
   const [error, setError] = useState(null);
 
+  // One announcer per screen, so the same pose is not read out again every
+  // time the camera loop re-renders. See the note in Verify.
+  const [announcer] = useState(createAnnouncer);
+
   const camera = useCamera(phase === 'capturing');
   const busy = useRef(false);
 
@@ -56,6 +73,9 @@ export function Enroll({ onDone, onCancel, presetName = '', presetPin = '' }) {
     event?.preventDefault();
     setError(null);
     try {
+      // A second run through this screen starts at the first pose again, and
+      // the announcer would otherwise still be holding it as "already said".
+      announcer.reset();
       setSession(await api.startEnrollment({ displayName: name.trim() }));
       setPhase('capturing');
     } catch (cause) {
@@ -136,6 +156,26 @@ export function Enroll({ onDone, onCancel, presetName = '', presetPin = '' }) {
     // `collected` restarts the countdown after each sample lands; `rejection`
     // restarts it after one is turned away.
   }, [phase, cameraStatus, collected, rejection, takeSample]);
+
+  // Say the pose when it changes.
+  //
+  // This is the one instruction someone cannot follow and read at the same
+  // time: the whole point of "turn your head left" is that they stop looking
+  // at the screen. Written-only guidance asks them to break the pose to find
+  // out what the pose is.
+  //
+  // Deliberately not keyed on `rejection`. A turned-away sample keeps the same
+  // pose, and the announcer would stay quiet anyway -- which leaves the reason
+  // `takeSample` speaks ("too blurry", "move closer") audible instead of being
+  // cut off by the pose being repeated over it.
+  //
+  // Above the early returns below, and it has to stay there: hooks are counted
+  // per render, so one placed after a `return` renders a different number on
+  // that branch and blanks the screen.
+  useEffect(() => {
+    if (phase !== 'capturing' || cameraStatus !== 'ready') return;
+    announcer.announce(SPOKEN.pose(poseFor(session, collected)));
+  }, [phase, cameraStatus, collected, session, announcer]);
 
   if (phase === 'name') {
     return (
@@ -234,8 +274,7 @@ export function Enroll({ onDone, onCancel, presetName = '', presetPin = '' }) {
   }
 
   const required = session?.samplesRequired ?? 5;
-  const guidance = session?.guidance ?? [];
-  const prompt = guidance[Math.min(collected, guidance.length - 1)] ?? 'Hold still';
+  const prompt = poseFor(session, collected);
 
   return (
     <div className="screen">
