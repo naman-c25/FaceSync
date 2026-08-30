@@ -13,6 +13,25 @@ import { randomUUID } from 'node:crypto';
  * own behaviour under test: timeout handling, status mapping, and the way a
  * FastAPI `detail` payload is unwrapped.
  */
+/**
+ * Ids resolved against the resident gallery, or the inline pool.
+ *
+ * Mirrors the real service: a `gallery_id` that is not the loaded one is
+ * refused rather than answered, so the retry path is exercised here too.
+ */
+function resolvePool(state, body) {
+  if (!body.candidate_ids) return body.gallery ?? [];
+
+  if (body.gallery_id !== state.loadedGalleryId) {
+    throw Object.assign(new Error('gallery_stale: push the gallery and retry'), {
+      status: 409,
+    });
+  }
+
+  const held = new Map(state.loadedEntries.map((e) => [e.user_id, e]));
+  return body.candidate_ids.filter((id) => held.has(id)).map((id) => held.get(id));
+}
+
 export function createFakeMlService({ port = 8099 } = {}) {
   const state = {
     // Tests mutate these to steer the next response.
@@ -29,6 +48,13 @@ export function createFakeMlService({ port = 8099 } = {}) {
     failNextRequest: null, // { status, detail }
     delayMs: 0,
     requests: [],
+
+    // The resident gallery, mirroring what the real service holds. Tests can
+    // clear `loadedGalleryId` to act out a Python restart.
+    loadedGalleryId: null,
+    loadedEntries: [],
+    // Set to refuse the next /gallery/load, to exercise the inline fallback.
+    failNextGalleryLoad: false,
   };
 
   const signals = (challenge = ['Blink 2 times', 'Look to your left']) => ({
@@ -83,15 +109,33 @@ export function createFakeMlService({ port = 8099 } = {}) {
     // to a nothing score, but a test can raise it to put a second face above
     // the duplicate threshold — which is what happens once the gallery holds
     // benchmark rows and the highest scorer is not the one that matters.
+    'POST /gallery/load': (body) => {
+      if (state.failNextGalleryLoad) {
+        state.failNextGalleryLoad = false;
+        throw Object.assign(new Error('gallery load refused'), { status: 503 });
+      }
+      state.loadedGalleryId = body.gallery_id;
+      state.loadedEntries = body.entries;
+      return {
+        gallery_id: state.loadedGalleryId,
+        size: state.loadedEntries.length,
+        bytes: state.loadedEntries.length * 512 * 4,
+      };
+    },
+
+    'GET /gallery/status': () => ({
+      gallery_id: state.loadedGalleryId,
+      size: state.loadedEntries.length,
+      bytes: state.loadedEntries.length * 512 * 4,
+    }),
+
     'POST /compare': (body) => {
       // `compareUserId` names who the comparison should land on. The default of
       // "whatever is first in the gallery" is fine for the duplicate check, but
       // the widened second-tier search exists precisely to find someone the
       // narrow pool left out, so a test has to be able to say who that is.
-      const winner =
-        state.compareUserId ??
-        body.gallery[0]?.user_id ??
-        null;
+      const pool = resolvePool(state, body);
+      const winner = state.compareUserId ?? pool[0]?.user_id ?? null;
       const matched = state.duplicateScore >= 0.45;
 
       return {
@@ -100,10 +144,10 @@ export function createFakeMlService({ port = 8099 } = {}) {
         top_score: state.duplicateScore,
         runner_up_score: state.compareRunnerUp,
         margin: Number((state.duplicateScore - state.compareRunnerUp).toFixed(4)),
-        gallery_size: body.gallery.length,
+        gallery_size: pool.length,
         candidates: [
           { user_id: winner, score: state.duplicateScore },
-          ...body.gallery
+          ...pool
             .filter((entry) => entry.user_id !== winner)
             .slice(0, 4)
             .map((entry) => ({ user_id: entry.user_id, score: state.compareRunnerUp })),
@@ -134,8 +178,9 @@ export function createFakeMlService({ port = 8099 } = {}) {
     },
 
     'POST /verify/match': (body) => {
+      const pool = resolvePool(state, body);
       const matched = state.matchDecision === 'matched';
-      const topId = state.matchUserId ?? body.gallery[0]?.user_id ?? null;
+      const topId = state.matchUserId ?? pool[0]?.user_id ?? null;
 
       return {
         decision: state.matchDecision,
@@ -143,8 +188,8 @@ export function createFakeMlService({ port = 8099 } = {}) {
         top_score: state.topScore,
         runner_up_score: state.runnerUpScore,
         margin: Number((state.topScore - state.runnerUpScore).toFixed(4)),
-        gallery_size: body.gallery.length,
-        candidates: body.gallery.slice(0, 5).map((entry, index) => ({
+        gallery_size: pool.length,
+        candidates: pool.slice(0, 5).map((entry, index) => ({
           user_id: entry.user_id,
           score: index === 0 ? state.topScore : state.runnerUpScore,
         })),
@@ -196,7 +241,14 @@ export function createFakeMlService({ port = 8099 } = {}) {
       const handler = routes[key];
       if (!handler) return send(404, { detail: `no fake route for ${key}` });
 
-      return send(200, handler(raw ? JSON.parse(raw) : {}));
+      // A handler may refuse with a status, which is how the resident gallery
+      // reports a stale id -- the real service answers 409 there and the
+      // client is expected to re-push and retry.
+      try {
+        return send(200, handler(raw ? JSON.parse(raw) : {}));
+      } catch (cause) {
+        return send(cause.status ?? 500, { detail: cause.message });
+      }
     });
   });
 
@@ -217,6 +269,9 @@ export function createFakeMlService({ port = 8099 } = {}) {
         failNextRequest: null,
         delayMs: 0,
         requests: [],
+        loadedGalleryId: null,
+        loadedEntries: [],
+        failNextGalleryLoad: false,
       });
     },
     // Rejects rather than emitting on the server, so a port already in use

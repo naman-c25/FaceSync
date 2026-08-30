@@ -343,18 +343,33 @@ describe('verification', () => {
     const sessionId = await verifyUntilReady();
 
     await ctx.request('POST', '/api/verify/match', { sessionId });
-    const call = ctx.ml.state.requests.findLast(
-      (r) => r.key === 'POST /verify/match',
-    );
 
-    assert.equal(call.body.gallery.length, 2, 'both enrolled users must be compared');
-    for (const entry of call.body.gallery) {
+    // The vectors reach the ML service through the gallery push now, and the
+    // match names the ids it wants compared. Both halves are checked, because
+    // either one alone would pass on a gallery that never arrived.
+    const push = ctx.ml.state.requests.findLast((r) => r.key === 'POST /gallery/load');
+    const call = ctx.ml.state.requests.findLast((r) => r.key === 'POST /verify/match');
+
+    assert.ok(push, 'the gallery must have been pushed');
+    assert.equal(push.body.entries.length, 2, 'both enrolled users must be pushed');
+    for (const entry of push.body.entries) {
       assert.equal(
         Buffer.from(entry.embedding_b64, 'base64').length,
         512 * 4,
         'the gallery must carry decrypted 512-d vectors',
       );
     }
+
+    assert.equal(
+      call.body.candidate_ids.length,
+      2,
+      'both enrolled users must be compared',
+    );
+    assert.equal(
+      call.body.gallery_id,
+      push.body.gallery_id,
+      'the match must reference the gallery that was pushed',
+    );
   });
 
   it('refuses to name a user when the top two are too close', async () => {
@@ -562,6 +577,46 @@ describe('audit trail', () => {
     assert.equal(log.liveness.passed, false);
     assert.equal(log.liveness.failureReason, 'challenge_timeout');
     assert.equal(log.deviceId, 'kiosk-7');
+  });
+
+  it('a failed liveness check costs nothing downstream', async () => {
+    // The point of running liveness first is that a spoof attempt never
+    // reaches recognition. Recognition is the expensive half -- it builds the
+    // candidate gallery, which is a database read and a decrypt per enrolled
+    // user -- so a scan that dies at liveness must not pay for any of it.
+    //
+    // Enforced on the server rather than trusted to the client. The kiosk does
+    // stop on its own, but "the browser knows better than to ask" is not a
+    // guarantee; a replayed session id would be.
+    const start = await ctx.request('POST', '/api/verify/start', {
+      deviceId: 'kiosk-7',
+    });
+    ctx.ml.state.livenessOutcome = 'failed';
+
+    await ctx.request('POST', '/api/verify/frame', {
+      sessionId: start.body.sessionId,
+      frames: batch(),
+    });
+
+    const before = ctx.ml.state.requests.length;
+    const match = await ctx.request('POST', '/api/verify/match', {
+      sessionId: start.body.sessionId,
+    });
+
+    assert.equal(match.status, 409);
+    assert.equal(match.body.error.code, 'session_completed');
+
+    // Nothing reached the ML service, which means no gallery was built for it.
+    assert.equal(
+      ctx.ml.state.requests.length,
+      before,
+      'a refused match must not call the ML service',
+    );
+    assert.equal(
+      await VerificationLog.countDocuments({ sessionId: start.body.sessionId }),
+      1,
+      'the liveness failure is the only row this scan writes',
+    );
   });
 
   it('keeps the probe embedding when an attempt does not resolve to a user', async () => {

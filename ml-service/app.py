@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException
 import face_detection
 import pad
 import preprocessing
+import gallery_store
 import recognition
 from config import settings
 from liveness import LivenessSession, LivenessStatus
@@ -28,6 +29,8 @@ from schemas import (
     CandidateModel,
     CapturedFrame,
     CompareRequest,
+    GalleryLoadRequest,
+    GalleryStatusResponse,
     CompareResponse,
     EnrollmentCaptureResponse,
     EnrollmentFinalizeRequest,
@@ -315,6 +318,57 @@ def enroll_finalize(request: EnrollmentFinalizeRequest) -> EnrollmentFinalizeRes
     )
 
 
+
+def _resolve_gallery(request) -> tuple[list[str], "np.ndarray"] | None:
+    """Ids and matrix for a request, or None to fall back to the inline pool.
+
+    Returns None only when the caller sent no ids at all -- the pre-resident
+    shape, still supported so a sync failure costs speed rather than service.
+    A stale `gallery_id` is a 409 instead, because answering it from the wrong
+    gallery would look like a successful scan of a stranger.
+    """
+    if request.candidate_ids is None:
+        return None
+
+    try:
+        return gallery_store.rows_for(request.gallery_id, request.candidate_ids)
+    except gallery_store.GalleryStale:
+        raise HTTPException(
+            status_code=409,
+            detail="gallery_stale: push the gallery and retry",
+        ) from None
+
+
+@app.post("/gallery/load", response_model=GalleryStatusResponse)
+def gallery_load(request: GalleryLoadRequest) -> GalleryStatusResponse:
+    """Take the whole enrolled gallery and hold it as one matrix.
+
+    Called by Node at boot and again whenever an enrollment or a deletion
+    changes what is on file. Decoding every entry here once is what a scan no
+    longer has to do, and it is the entire saving: at 10,000 users this moved
+    roughly 270ms of transport and ten thousand base64 decodes off the path a
+    customer waits on.
+    """
+    try:
+        size = gallery_store.load(
+            request.gallery_id,
+            [(entry.user_id, entry.embedding_b64) for entry in request.entries],
+        )
+    except ValueError as exc:
+        # A malformed vector leaves the previous gallery serving rather than
+        # emptying it -- a bad push must not be able to take the till down.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    logger.info("gallery loaded: %d entries (%s)", size, request.gallery_id)
+    return GalleryStatusResponse(**gallery_store.status())
+
+
+@app.get("/gallery/status", response_model=GalleryStatusResponse)
+def gallery_status() -> GalleryStatusResponse:
+    """What is resident, for a health check or a look at memory use."""
+    return GalleryStatusResponse(**gallery_store.status())
+
+
 @app.post("/compare", response_model=CompareResponse)
 def compare(request: CompareRequest) -> CompareResponse:
     """Match one embedding against a gallery, outside any session.
@@ -331,20 +385,29 @@ def compare(request: CompareRequest) -> CompareResponse:
     spoofed frame is ever matched, and it should not be weakened to accommodate
     a different question.
     """
+    resolved = _resolve_gallery(request)
+
     try:
         probe = recognition.decode_embedding(request.embedding_b64)
-        gallery = [
-            recognition.GalleryEntry(
-                user_id=entry.user_id,
-                embedding=recognition.decode_embedding(entry.embedding_b64),
-            )
-            for entry in request.gallery
-        ]
+        if resolved is None:
+            gallery = [
+                recognition.GalleryEntry(
+                    user_id=entry.user_id,
+                    embedding=recognition.decode_embedding(entry.embedding_b64),
+                )
+                for entry in request.gallery
+            ]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    result = recognition.identify(
-        probe, gallery, threshold=request.threshold, margin=request.margin
+    result = (
+        recognition.identify_in(
+            probe, *resolved, threshold=request.threshold, margin=request.margin
+        )
+        if resolved is not None
+        else recognition.identify(
+            probe, gallery, threshold=request.threshold, margin=request.margin
+        )
     )
 
     return CompareResponse(
@@ -617,19 +680,28 @@ def verify_match(request: MatchRequest) -> MatchResponse:
     # Held before the session is discarded below, since the response returns it.
     probe = session.probe_embedding
 
+    resolved = _resolve_gallery(request)
+
     try:
-        gallery = [
-            recognition.GalleryEntry(
-                user_id=entry.user_id,
-                embedding=recognition.decode_embedding(entry.embedding_b64),
-            )
-            for entry in request.gallery
-        ]
+        if resolved is None:
+            gallery = [
+                recognition.GalleryEntry(
+                    user_id=entry.user_id,
+                    embedding=recognition.decode_embedding(entry.embedding_b64),
+                )
+                for entry in request.gallery
+            ]
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    result = recognition.identify(
-        probe, gallery, threshold=request.threshold, margin=request.margin
+    result = (
+        recognition.identify_in(
+            probe, *resolved, threshold=request.threshold, margin=request.margin
+        )
+        if resolved is not None
+        else recognition.identify(
+            probe, gallery, threshold=request.threshold, margin=request.margin
+        )
     )
 
     # Captured before the session is discarded, since the log needs it.

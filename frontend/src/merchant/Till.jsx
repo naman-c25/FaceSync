@@ -47,9 +47,13 @@ export function Till({ merchant, onSignOut }) {
     setOutcome(null);
 
     try {
+      // No region. The server reads it from this shop's own record, the way it
+      // reads the shop id from the token -- sending it from here meant a value
+      // the server already holds made a round trip through the browser, where
+      // it stopped being something the server knew and became something the
+      // caller said.
       const started = await merchantApi.startVerification({
         deviceId: deviceId('till'),
-        region: merchant.region,
       });
       sessionRef.current = started;
       setLiveness({

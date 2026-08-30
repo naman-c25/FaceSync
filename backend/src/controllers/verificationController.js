@@ -23,7 +23,6 @@ import { mlService } from '../services/mlServiceClient.js';
 // id and scan customers anyway.
 const startSchema = z.object({
   deviceId: z.string().trim().max(80).nullish(),
-  region: z.string().trim().max(80).nullish(),
 });
 
 // Frames arrive in batches, each carrying the moment it was taken. The
@@ -92,7 +91,7 @@ async function writeLog(session, fields) {
  * rule the rest of the codebase already follows, in `requireMerchant`: a
  * merchant id from a request body is a value the caller chose, not an identity.
  */
-async function openSession(req, res, merchantId) {
+async function openSession(req, res, merchantId, region) {
   const body = startSchema.parse(req.body);
 
   const mlSession = await mlService.startVerification();
@@ -102,7 +101,7 @@ async function openSession(req, res, merchantId) {
     mlSessionId: mlSession.session_id,
     merchantId,
     deviceId: body.deviceId ?? null,
-    region: body.region ?? null,
+    region: region ?? null,
   });
 
   res.status(201).json({
@@ -114,14 +113,14 @@ async function openSession(req, res, merchantId) {
 
 /** The public kiosk. Always the kiosk's own shop id, whatever was sent. */
 export async function startVerification(req, res) {
-  return openSession(req, res, config.KIOSK_MERCHANT_ID);
+  return openSession(req, res, config.KIOSK_MERCHANT_ID, config.KIOSK_REGION);
 }
 
 /** A till. Behind `requireMerchant`, so the shop comes from the token. */
 export async function startMerchantVerification(req, res) {
   const shop = await Merchant.findOne({
     merchantId: req.merchant.merchantId,
-  }).select('verified active');
+  }).select('verified active region');
 
   if (!shop?.active) {
     throw new ApiError(401, 'Session is no longer valid', 'invalid_session');
@@ -139,10 +138,11 @@ export async function startMerchantVerification(req, res) {
     );
   }
 
-  // From the token rather than the row just read: it is the identity the
-  // request actually authenticated as, and the projection above does not
-  // even include the field.
-  return openSession(req, res, req.merchant.merchantId);
+  // The id comes from the token -- it is the identity the request actually
+  // authenticated as. The region comes from the row, because the till used to
+  // read it from /me and post it back, which made a value the server already
+  // holds into a value the caller chose.
+  return openSession(req, res, req.merchant.merchantId, shop.region);
 }
 
 /**

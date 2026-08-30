@@ -131,8 +131,11 @@ describe('benchmark rows in the gallery', () => {
       (r) => r.key === 'POST /verify/match',
     );
     assert.ok(matchCall, 'no match request reached the ML service');
+    // The pool is named by id now, the vectors having been pushed once. What
+    // is being checked is unchanged: the benchmark row is genuinely among the
+    // faces this scan competes against.
     assert.equal(
-      matchCall.body.gallery.length,
+      (matchCall.body.candidate_ids ?? matchCall.body.gallery).length,
       2,
       'the benchmark row was not in the candidate pool',
     );

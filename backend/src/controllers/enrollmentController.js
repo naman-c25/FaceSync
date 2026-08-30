@@ -6,6 +6,8 @@ import { User } from '../models/User.js';
 import { buildCandidatePool } from '../services/candidatePool.js';
 import { encryptEmbedding } from '../services/encryption.js';
 import { evict } from '../services/galleryCache.js';
+import { compareWithGallery } from '../services/identification.js';
+import { invalidate as invalidateGallerySync } from '../services/gallerySync.js';
 import { hashPin, rejectWeakPin, verifyPin } from '../services/pin.js';
 import { mlService } from '../services/mlServiceClient.js';
 import { ApiError } from '../middleware/errorHandler.js';
@@ -211,6 +213,11 @@ export async function finalizeEnrollment(req, res) {
   // the database exactly as it was stored.
   evict(user._id);
 
+  // The ML service is holding a copy too, and a *replacement* is the case its
+  // own id check cannot catch -- the id is one it already knows, so only this
+  // says the vector behind it changed.
+  invalidateGallerySync();
+
   session.completed = true;
   await session.save();
 
@@ -265,7 +272,7 @@ async function findExistingRegistration(embeddingB64) {
   const { gallery } = await buildCandidatePool({});
   if (gallery.length === 0) return null;
 
-  const comparison = await mlService.compare(embeddingB64, gallery);
+  const comparison = await compareWithGallery(embeddingB64, gallery);
 
   const close = comparison.candidates.filter((c) => c.score >= DUPLICATE_THRESHOLD);
   if (close.length === 0) return null;

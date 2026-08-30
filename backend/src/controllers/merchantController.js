@@ -23,6 +23,14 @@ const registerSchema = z.object({
   // Long rather than complicated. A shop password guards a terminal that can
   // charge people, and length is the only rule that reliably buys anything.
   password: z.string().min(10).max(200),
+  // The area this terminal stands in -- a free string the shops in one place
+  // agree on ("delhi", "sector-18"), not coordinates. It narrows the candidate
+  // pool to people who live or shop nearby, which cuts the false match rate
+  // roughly in proportion to how much smaller the pool gets.
+  //
+  // Optional, and null is a working answer: a shop without one still narrows
+  // by its own repeat customers.
+  region: z.string().trim().max(80).nullish(),
 });
 
 const historySchema = z.object({
@@ -64,6 +72,7 @@ export async function register(req, res) {
     name: body.name,
     email: body.email,
     passwordHash: hashPassword(body.password),
+    region: body.region || null,
     role: 'merchant',
     verified: false,
   });

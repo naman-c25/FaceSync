@@ -163,3 +163,82 @@ describe('an unapproved terminal cannot look at anybody', () => {
     assert.equal((await scanAs(body.token)).status, 201);
   });
 });
+
+/**
+ * Which area a scan searches first.
+ *
+ * The region narrows the candidate pool, and a smaller pool is a proportionally
+ * smaller false-match rate -- system FMR grows as N x the per-comparison rate.
+ * So it is worth getting right, and worth taking from somewhere the caller
+ * cannot choose.
+ */
+describe('a terminal knows its own area', () => {
+  it('takes the region from the shop record, not the request', async () => {
+    // It used to arrive in the request body: the till read it from /me and
+    // posted it back. That made a value the server already held into a value
+    // the caller supplied -- the same shape as the shop id, which is how an
+    // unapproved terminal once scanned customers.
+    const shop = await signUp();
+    const record = await Merchant.findOne({ email: 'corner@shop.test' });
+    record.verified = true;
+    record.region = 'sector-18';
+    await record.save();
+
+    const started = await fetch(`${ctx.baseUrl}/api/merchant/verify/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${shop.body.token}`,
+      },
+      // Deliberately asking for somewhere else.
+      body: JSON.stringify({ deviceId: 'till-1', region: 'somewhere-else' }),
+    });
+    assert.equal(started.status, 201);
+
+    const { Session } = await import('../src/models/Session.js');
+    const session = await Session.findById((await started.json()).sessionId);
+
+    assert.equal(
+      session.region,
+      'sector-18',
+      'the session took the region the caller asked for',
+    );
+  });
+
+  it('is happy with no region at all', async () => {
+    // Null is a working answer: the shop still narrows by its own repeat
+    // customers, and a pool that does not narrow is correct, only larger.
+    const shop = await signUp();
+    const record = await Merchant.findOne({ email: 'corner@shop.test' });
+    record.verified = true;
+    await record.save();
+
+    const started = await scanAs(shop.body.token);
+    assert.equal(started.status, 201);
+
+    const { Session } = await import('../src/models/Session.js');
+    const session = await Session.findById((await started.json()).sessionId);
+    assert.equal(session.region, null);
+  });
+
+  it('records the region against a customer it recognises', async () => {
+    // The half of this that was already working was `knownMerchants`; the
+    // region was never written because nothing ever supplied one. This is what
+    // makes a customer a local rather than only a regular of one shop.
+    const { User } = await import('../src/models/User.js');
+    const { recordSighting } = await import('../src/services/candidatePool.js');
+
+    const user = await User.create({
+      displayName: 'Local Person',
+      embedding: Buffer.alloc(2077),
+      enrollment: { samplesUsed: 5, meanSimilarity: 0.96 },
+    });
+    assert.equal(user.homeRegion, null, 'nobody starts with a region');
+
+    await recordSighting(user._id, { merchantId: 'corner-store', region: 'sector-18' });
+
+    const seen = await User.findById(user._id).lean();
+    assert.equal(seen.homeRegion, 'sector-18');
+    assert.deepEqual(seen.knownMerchants, ['corner-store']);
+  });
+});

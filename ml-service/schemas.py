@@ -214,17 +214,48 @@ class GalleryEntryModel(BaseModel):
     embedding_b64: str
 
 
+class GalleryLoadRequest(BaseModel):
+    """Push the whole enrolled gallery into this process, once.
+
+    Node stamps each push with a `gallery_id` it makes up. Requests below carry
+    that id back, and a mismatch is refused rather than answered from whatever
+    happens to be resident -- a gallery missing the person at the till returns
+    `no_match`, which is indistinguishable from a stranger.
+    """
+
+    gallery_id: str
+    entries: list[GalleryEntryModel]
+
+
+class GalleryStatusResponse(BaseModel):
+    gallery_id: str | None
+    size: int
+    bytes: int
+
+
 class MatchRequest(BaseModel):
     """A probe session plus the candidate pool to search.
 
-    `gallery` is not necessarily every enrolled user. Node narrows it first —
+    The pool is not necessarily every enrolled user. Node narrows it first —
     by merchant locality, recent activity, or repeat-customer history — so the
-    comparison count stays bounded as enrollment grows. At demo scale it is
-    simply everyone.
+    comparison count stays bounded as enrollment grows.
+
+    Two ways to say which candidates, and they mean the same thing:
+
+    `candidate_ids` + `gallery_id` is the one to use. The vectors already live
+    here, so a scan sends a few hundred bytes of ids instead of megabytes of
+    base64 -- measured at 10,000 users, shipping the gallery cost about 270ms
+    per scan around a comparison that takes 0.345ms.
+
+    `gallery` carries the vectors inline, as everything did before the resident
+    store existed. Kept as the fallback for when a push has not happened yet,
+    so a sync problem degrades to the old speed rather than to no service.
     """
 
     session_id: str
-    gallery: list[GalleryEntryModel]
+    gallery: list[GalleryEntryModel] = []
+    candidate_ids: list[str] | None = None
+    gallery_id: str | None = None
     threshold: float | None = None
     margin: float | None = None
 
@@ -244,7 +275,9 @@ class CompareRequest(BaseModel):
     """
 
     embedding_b64: str
-    gallery: list[GalleryEntryModel]
+    gallery: list[GalleryEntryModel] = []
+    candidate_ids: list[str] | None = None
+    gallery_id: str | None = None
     threshold: float | None = None
     margin: float | None = None
 

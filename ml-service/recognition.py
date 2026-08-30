@@ -172,10 +172,36 @@ def identify(
        coin flip dressed up as a decision, so this returns AMBIGUOUS instead
        and lets the caller fall back to a second factor.
     """
+    return identify_in(
+        probe,
+        [entry.user_id for entry in gallery],
+        np.stack([entry.embedding for entry in gallery])
+        if gallery
+        else np.empty((0, EMBEDDING_DIM), dtype=np.float32),
+        threshold=threshold,
+        margin=margin,
+    )
+
+
+def identify_in(
+    probe: np.ndarray,
+    ids: list[str],
+    matrix: np.ndarray,
+    *,
+    threshold: float | None = None,
+    margin: float | None = None,
+) -> MatchResult:
+    """The same decision, against a matrix that is already built.
+
+    `identify` above delegates here rather than duplicating the rule, so the
+    gallery-resident path and the ship-the-gallery path cannot drift. The only
+    difference between them is where the matrix came from; the arithmetic below
+    is the arithmetic every threshold in this system was measured against.
+    """
     threshold = settings.match_threshold if threshold is None else threshold
     margin = settings.match_margin if margin is None else margin
 
-    if not gallery:
+    if len(ids) == 0:
         return MatchResult(
             decision=MatchDecision.NO_MATCH,
             user_id=None,
@@ -186,29 +212,28 @@ def identify(
             candidates=[],
         )
 
-    matrix = np.stack([entry.embedding for entry in gallery])
     scores = cosine_similarity(probe, matrix)
 
     # Rank the whole gallery, then keep a short head for the audit log.
     order = np.argsort(scores)[::-1]
     candidates = [
-        Candidate(user_id=gallery[i].user_id, score=round(float(scores[i]), 4))
+        Candidate(user_id=ids[i], score=round(float(scores[i]), 4))
         for i in order[:5]
     ]
 
     top_score = float(scores[order[0]])
-    runner_up_score = float(scores[order[1]]) if len(gallery) > 1 else 0.0
+    runner_up_score = float(scores[order[1]]) if len(ids) > 1 else 0.0
     observed_margin = top_score - runner_up_score
 
     if top_score < threshold:
         decision = MatchDecision.NO_MATCH
         user_id = None
-    elif len(gallery) > 1 and observed_margin < margin:
+    elif len(ids) > 1 and observed_margin < margin:
         decision = MatchDecision.AMBIGUOUS
         user_id = None
     else:
         decision = MatchDecision.MATCHED
-        user_id = gallery[order[0]].user_id
+        user_id = ids[order[0]]
 
     return MatchResult(
         decision=decision,
@@ -216,7 +241,7 @@ def identify(
         top_score=round(top_score, 4),
         runner_up_score=round(runner_up_score, 4),
         margin=round(observed_margin, 4),
-        gallery_size=len(gallery),
+        gallery_size=len(ids),
         candidates=candidates,
     )
 

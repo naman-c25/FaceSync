@@ -5,6 +5,7 @@ import { Transaction } from '../models/Transaction.js';
 import { User } from '../models/User.js';
 import { VerificationLog } from '../models/VerificationLog.js';
 import { evict } from '../services/galleryCache.js';
+import { invalidate as invalidateGallerySync } from '../services/gallerySync.js';
 import { Merchant } from '../models/Merchant.js';
 import {
   checkPinAttempt,
@@ -347,6 +348,7 @@ export async function deleteFaceData(req, res) {
   await User.deleteOne({ _id: user._id });
   // Without this the face stays matchable from memory until the TTL, which
   // would make the deletion this endpoint promises a lie.
+  invalidateGallerySync();
   evict(user._id);
 
   res.json({

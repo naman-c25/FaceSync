@@ -99,6 +99,16 @@ const schema = z.object({
   // shop can borrow one -- see startVerification.
   KIOSK_MERCHANT_ID: z.string().trim().min(1).default('demo-shop'),
 
+  // The area the public kiosk stands in, used to narrow the candidate pool.
+  // A deployment fact rather than a database one, and set here rather than
+  // read from the request for the same reason the shop id is: a region from
+  // a request body is a value the caller chose.
+  //
+  // Null by default, which simply means the kiosk does not narrow by area --
+  // repeat-customer history still does. Set it to the same string the local
+  // shops use (`delhi`, `sector-18`) and the two work together.
+  KIOSK_REGION: z.string().trim().nullish().transform((v) => v || null),
+
   CANDIDATE_POOL_MAX: z.coerce.number().int().positive().default(5000),
 
   // Below this many active users, narrowing is skipped entirely and everyone

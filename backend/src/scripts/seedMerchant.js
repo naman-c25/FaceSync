@@ -12,6 +12,7 @@ import { hashPassword } from '../services/merchantAuth.js';
  *     node src/scripts/seedMerchant.js "Corner Store" corner@shop.test
  *     node src/scripts/seedMerchant.js "Corner Store" corner@shop.test --password mine
  *     node src/scripts/seedMerchant.js --verify shop@newshop.test
+ *     node src/scripts/seedMerchant.js --set-region delhi shop@newshop.test
  *
  * There is no self-registration endpoint, on purpose. A merchant terminal can
  * charge a customer's face, so who gets one is an administrative decision, not
@@ -24,6 +25,41 @@ const [, , name, email, ...rest] = process.argv;
 // Approving a shop that signed itself up. Its own flag rather than part of the
 // create path, because approval is the administrative act -- the account
 // already exists and only the camera is being unlocked.
+
+// Setting the area a terminal stands in. Shops in one place should agree on
+// the string; it is compared for equality, not parsed.
+if (name === '--set-region') {
+  const region = email;
+  const target = process.argv[4];
+  if (!region || !target) {
+    console.error(
+      'Usage: node src/scripts/seedMerchant.js --set-region <region> <email>',
+    );
+    process.exit(1);
+  }
+
+  const { Merchant: M } = await import('../models/Merchant.js');
+  const m = (await import('mongoose')).default;
+  const { config: c } = await import('../config/index.js');
+
+  await m.connect(c.MONGODB_URI);
+  const shop = await M.findOne({ email: target.toLowerCase() });
+
+  if (!shop) {
+    console.error(`\nNo merchant with the email ${target}.`);
+    process.exitCode = 1;
+  } else {
+    shop.region = region;
+    await shop.save();
+    console.log(`\n${shop.name} (${shop.merchantId}) is now in "${region}".`);
+    console.log('\nCustomers it recognises will be filed under that region,');
+    console.log('and its scans will look there first.');
+  }
+
+  await m.disconnect();
+  process.exit(process.exitCode ?? 0);
+}
+
 if (name === '--verify') {
   const target = email;
   if (!target) {

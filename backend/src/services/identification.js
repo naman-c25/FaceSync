@@ -4,6 +4,7 @@ import { User } from '../models/User.js';
 import { VerificationLog } from '../models/VerificationLog.js';
 import { buildCandidatePool, recordSighting } from './candidatePool.js';
 import { encryptEmbedding } from './encryption.js';
+import * as gallerySync from './gallerySync.js';
 import { mlService } from './mlServiceClient.js';
 
 /**
@@ -19,6 +20,39 @@ import { mlService } from './mlServiceClient.js';
  * The caller is responsible for what happens next — this neither charges
  * anything nor decides whether the outcome is good enough to act on.
  */
+/**
+ * A match that survives the ML service losing its copy of the gallery.
+ *
+ * `gallery_stale` means Python restarted, or was pushed a different gallery.
+ * One re-push and one retry covers it; a second failure ships the vectors
+ * inline, which is slower and always correct.
+ */
+async function matchWithGallery(mlSessionId, gallery) {
+  const galleryId = await gallerySync.reference(gallery);
+  try {
+    return await mlService.match(mlSessionId, gallery, {}, galleryId);
+  } catch (cause) {
+    if (!isStaleGallery(cause)) throw cause;
+    gallerySync.invalidate();
+    return mlService.match(mlSessionId, gallery, {}, await gallerySync.reference(gallery));
+  }
+}
+
+/** The same, for the widened second tier and the enrollment duplicate check. */
+export async function compareWithGallery(probeB64, gallery) {
+  const galleryId = await gallerySync.reference(gallery);
+  try {
+    return await mlService.compare(probeB64, gallery, galleryId);
+  } catch (cause) {
+    if (!isStaleGallery(cause)) throw cause;
+    gallerySync.invalidate();
+    return mlService.compare(probeB64, gallery, await gallerySync.reference(gallery));
+  }
+}
+
+const isStaleGallery = (cause) =>
+  cause?.status === 409 && String(cause.detail ?? '').includes('gallery_stale');
+
 export async function identifyFromSession(session, { completeOnMatch = true } = {}) {
   const startedAt = Date.now();
   session.attempts += 1;
@@ -37,7 +71,10 @@ export async function identifyFromSession(session, { completeOnMatch = true } = 
     );
   }
 
-  let result = await mlService.match(session.mlSessionId, gallery);
+  // Ids rather than vectors when the ML service already holds them. A stale
+  // reference is refused there rather than answered from the wrong gallery, so
+  // the retry below is the only place that has to know about it.
+  let result = await matchWithGallery(session.mlSessionId, gallery);
   let widened = false;
 
   // Second tier. A narrowed pool that comes back empty-handed has not
@@ -57,7 +94,7 @@ export async function identifyFromSession(session, { completeOnMatch = true } = 
     const wide = await buildCandidatePool({ narrow: false });
 
     if (wide.gallery.length > gallery.length) {
-      const second = await mlService.compare(result.probe_embedding_b64, wide.gallery);
+      const second = await compareWithGallery(result.probe_embedding_b64, wide.gallery);
 
       if (second.decision !== 'no_match') {
         result = {

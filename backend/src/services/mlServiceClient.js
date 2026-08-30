@@ -63,6 +63,13 @@ async function request(endpoint, body) {
   return response.json();
 }
 
+/** Ids when the gallery is resident, the vectors themselves when it is not. */
+function galleryPayload(gallery, galleryId) {
+  return galleryId
+    ? { candidate_ids: gallery.map((entry) => entry.user_id), gallery_id: galleryId }
+    : { gallery };
+}
+
 export const mlService = {
   async health() {
     const response = await fetch(`${config.ML_SERVICE_URL}/health`, {
@@ -94,10 +101,26 @@ export const mlService = {
    * no spoofed frame is ever matched, and it should not be relaxed to answer a
    * different question.
    */
-  compare: (embeddingB64, gallery) =>
+  /**
+   * Hand the ML service the whole gallery to hold in memory.
+   *
+   * Called at boot and whenever a signature changes. Everything after this
+   * sends ids rather than vectors -- see services/gallerySync.js for why.
+   */
+  loadGallery: (galleryId, entries) =>
+    request('/gallery/load', { gallery_id: galleryId, entries }),
+
+  galleryStatus: () => request('/gallery/status'),
+
+  /**
+   * `galleryId` present means the vectors are already resident and only ids
+   * travel. Absent means ship them inline, which is what happened before the
+   * resident store existed and is still the fallback when a push has failed.
+   */
+  compare: (embeddingB64, gallery, galleryId = null) =>
     request('/compare', {
       embedding_b64: embeddingB64,
-      gallery,
+      ...galleryPayload(gallery, galleryId),
       threshold: config.MATCH_THRESHOLD ?? null,
       margin: config.MATCH_MARGIN ?? null,
     }),
@@ -122,10 +145,10 @@ export const mlService = {
    * exactly the vectors it needs to compare and nothing about who they are
    * beyond an opaque id.
    */
-  match: (sessionId, gallery, thresholds = {}) =>
+  match: (sessionId, gallery, thresholds = {}, galleryId = null) =>
     request('/verify/match', {
       session_id: sessionId,
-      gallery,
+      ...galleryPayload(gallery, galleryId),
       threshold: thresholds.threshold ?? config.MATCH_THRESHOLD ?? null,
       margin: thresholds.margin ?? config.MATCH_MARGIN ?? null,
     }),

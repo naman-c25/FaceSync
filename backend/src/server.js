@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 
 import { createApp } from './app.js';
 import { config } from './config/index.js';
+import { buildCandidatePool } from './services/candidatePool.js';
+import * as gallerySync from './services/gallerySync.js';
 
 async function main() {
   await mongoose.connect(config.MONGODB_URI);
@@ -15,6 +17,19 @@ async function main() {
     console.log(`[api] listening on http://127.0.0.1:${config.PORT}`);
     console.log(`[api] ML service at ${config.ML_SERVICE_URL}`);
   });
+
+  // Build the gallery and hand it to the ML service before a customer asks
+  // for it. The first scan after a restart otherwise pays for the whole
+  // thing: 1.2 seconds at two thousand signatures, and about 30 at ten
+  // thousand -- past the ML timeout, so at that size the first person after a
+  // deploy does not wait, they fail.
+  //
+  // Deliberately not awaited. The service is already listening and answering
+  // /health; making startup depend on a warm cache would turn a slow first
+  // scan into a deployment that never comes up.
+  gallerySync
+    .warm(() => buildCandidatePool({ narrow: false }))
+    .catch((cause) => console.error('[gallery] warm-up rejected:', cause.message));
 
   const shutdown = async (signal) => {
     console.log(`\n[api] ${signal} received, shutting down`);
