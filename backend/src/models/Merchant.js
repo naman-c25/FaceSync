@@ -42,9 +42,9 @@ const merchantSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      // `admin` reads the fraud dashboard and nothing else -- it is not a
-      // merchant with extra powers. Flags span every terminal, so showing them
-      // to a shop would hand it a window onto other shops' traffic.
+      // One role in practice. `admin` belonged to a review screen that no
+      // longer exists; the value stays in the enum only so an account created
+      // for it still loads rather than failing validation.
       enum: ['merchant', 'admin'],
       default: 'merchant',
       required: true,

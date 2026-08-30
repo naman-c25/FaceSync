@@ -5,11 +5,11 @@ out who you are.
 
 A prototype for the Razorpay hackathon, and it runs end to end: face detection,
 passive liveness, anti-spoofing, 1:N identification, a four-digit PIN, a
-Razorpay test-mode charge, a printable receipt, and rule-based fraud flagging
-over the audit trail.
+Razorpay test-mode charge, a printable receipt, and an audit trail of every
+attempt.
 
 Live at **https://facesync-production.up.railway.app** — kiosk at `/`, merchant
-till at `/merchant`, customer portal at `/user`, fraud review at `/fraud`.
+till at `/merchant`, customer portal at `/user`.
 
 The product is FaceSync. The directories, environment variables and storage
 keys still say FacePay, which is what it was called first; renaming those would
@@ -38,7 +38,7 @@ It also makes the problem genuinely harder, and the design follows from that:
 ```
 ml-service/   Python — face detection, liveness, embeddings, matching
 backend/      Node — API, MongoDB, encryption, the audit trail
-frontend/     React — four entry points, chosen by path
+frontend/     React — three entry points, chosen by path
 ```
 
 Each has its own README with the detail. Short version:
@@ -47,11 +47,10 @@ Each has its own README with the detail. Short version:
   records.
 - **backend** owns all of that and calls the ML service with frames, then with
   a candidate pool to match against.
-- **frontend** is four separate apps sharing one stylesheet: the kiosk (`/`),
-  the merchant till (`/merchant`), the customer portal (`/user`) and fraud
-  review (`/fraud`). They are split by path rather than folded together,
-  because nothing customer-facing should carry code that charges money, and
-  now also nothing should carry code that reads every terminal's traffic.
+- **frontend** is three separate apps sharing one stylesheet: the kiosk (`/`),
+  the merchant till (`/merchant`) and the customer portal (`/user`). They are
+  split by path rather than folded together, because nothing customer-facing
+  should carry code that charges money.
 
 ## Running the whole thing
 
@@ -89,7 +88,7 @@ python tools/kiosk_demo.py verify --merchant shop-1
 
 ```bash
 cd ml-service && pytest         # 174  (158 without the model-loading ones)
-cd backend && npm test          # 151  (needs MongoDB; the ML service is stubbed)
+cd backend && npm test          # 135  (needs MongoDB; the ML service is stubbed)
 cd frontend && npm run lint     # rules-of-hooks, mainly
 ```
 
@@ -143,7 +142,7 @@ the most relevant thing here.
 | blink thresholds | 5 people, open-eye EAR 0.316-0.418 |
 | challenge-mode cost | 86 attempts — median 8.0s, 1 in 5 failed |
 | the continuity threshold | 28 genuine sessions, 0.481-0.984 |
-| fraud rule replay | all 290 logs |
+| PAD scores in the wild | 131 attempts with a spoof score recorded |
 
 *Why it is not the accuracy number* — 9 of the 17 have been scanned once or
 never. Their scores are not evidence yet, and the README says so where they
@@ -163,9 +162,8 @@ FaceLandmarker, two MiniFASNets. Downloaded, converted to ONNX, and run as-is.
 and dense-landmark models in the bundle never load or run.
 
 *Why nothing was trained.* There is no data here worth training on. 17 users is
-not a training set, and there is no real fraud data at all — a trained fraud
-model built on invented fraud would be theatre. The fraud layer is rules, and
-says so.
+not a training set. Every threshold here was measured and set by hand, which
+is what the numbers below are.
 
 ## What has been measured
 
@@ -354,36 +352,23 @@ Every attempt is logged with both scores, the thresholds in force, and the full
 liveness signals, so these curves are drawn from real attempts rather than
 estimated.
 
-### The fraud rules, replayed over the real log
+### What the audit trail says about failures
 
-`npm run fraud:replay -- --sweep` re-runs every rule over all 290 logs at every
-threshold, importing the rules themselves so the numbers cannot drift from the
-shipped code. Shipped thresholds marked `*`:
+290 attempts over 6.7 days across 14 terminals, our own testing:
 
 ```
-rule                threshold  matching rows  firings  incidents
-pin_velocity             3 *             4        0        0
-spoof_burst              2              28       18        7
-spoof_burst              3 *            28       11        6
-spoof_burst              4              28        5        3
-liveness_velocity        3              48        9        6
-liveness_velocity        5 *            48        1        1
-liveness_velocity        6              48        0        0
+matched            177   61.0%
+liveness_failed     76   26.2%
+capture_failed      27    9.3%
+no_match             6    2.1%
+pin_failed           4    1.4%
 ```
 
-Reading it honestly, because the log is our own testing:
-
-- **`spoof_burst` is hitting real attacks.** Those 28 rows are deliberate photo
-  and phone-screen attacks. Its 6 incidents are true positives.
-- **`liveness_velocity` is misfiring.** Nobody was attacking during those 48
-  rows — they are ordinary failed scans in bad light. Threshold 5 was picked to
-  bring that to a single incident; 3 would raise six false ones.
-- **`pin_velocity` has never fired.** Refused PINs were not logged until this
-  rule needed them, so it starts with no history. 4 rows is not a test of
-  anything, and the rule is unproven rather than proven quiet.
-
-Liveness failures are 26% of all attempts, which is the largest single failure
-kind and mostly light. That is why the threshold sits where it does.
+Liveness failures are the largest single kind by a wide margin, and they are
+mostly light rather than attacks. That is measurable in the log: the anti-spoof
+score for a genuine face runs 0.88-0.99 in daylight and drops to 0.55-0.60 near
+midnight, against a threshold of 0.70 — so the same person is accepted in the
+afternoon and refused at night. See the note on calibration below.
 
 ## Liveness: what is running, and what that buys
 
@@ -586,19 +571,13 @@ frame rate is what blink detection depends on.
   extra rather than a gap.
 - **Phase 3** — Razorpay in test mode, wired to the auth result, producing a
   transaction record and a printable receipt.
-- **Phase 4** — rule-based flagging over `VerificationLog`, reviewed at
-  `/fraud` behind an admin account, which is also where a merchant that has
-  signed up gets approved. Not a trained model, deliberately: there is
-  no real fraud data to train on, and training on invented fraud would be
-  theatre. `npm run fraud:replay -- --sweep` re-runs every rule over the whole
-  log and prints how often each would fire.
 
 ## Merchants, and what signing up gets you
 
 Anyone can open a shop account, and it grants nothing on its own: the terminal
 it creates can sign in and read its own empty ledger, and that is all. Starting
-a scan needs approval, from `/fraud` or from
-`seedMerchant.js --verify <email>`.
+a scan needs approval, which is a command rather than a screen:
+`node src/scripts/seedMerchant.js --verify <email>`.
 
 The split is not about money. Charging already needs the customer's own PIN, so
 a hostile shop cannot take anything. What an unapproved terminal could do is
@@ -614,21 +593,23 @@ take the id the real one would want.
 ## Not built, and why
 
 - **Speaker verification.** Dropped for the reason above, not deferred.
-- **Two of the four fraud rules.** "Many distinct people at one terminal" and
-  "a spike in ambiguous results" were specified and left unbuilt. Replayed over
-  290 real logs they fire zero times at every threshold tried — there are 17
-  enrolled users and not one `ambiguous` outcome in the whole file. Shipping
-  them so the count reads four would be the same dishonesty as the
-  trained-model claim above.
+- **Automated fraud detection.** Rule-based flagging over `VerificationLog` was
+  built and then removed. Replayed over 290 real logs, the rules that fired at
+  all were firing on our own testing — deliberate photo attacks, which they
+  caught, and ordinary failed scans in bad light, which they did not distinguish
+  from attacks. A rule whose true and false positives cannot be told apart at
+  this volume is a number on a slide, not a control.
+  `VerificationLog` still records everything those rules read, so the data is
+  there when there is enough of it to mean something. That is the upgrade path,
+  and it needs real volume rather than more code.
+- **A trained anomaly model.** The same rows become labelled training data once
+  there is real fraud to label. There is none, and training on invented fraud
+  would be theatre.
 - **Self-service password reset for merchants.** A customer can prove
   themselves with a PIN and a face. A shop account has neither, so anything
   automatic would come down to whoever controls the mailbox — and nothing here
   sends mail. The sign-in screen points at a human instead, and resets happen
   through `seedMerchant.js --reset-password`.
-
-- **A trained anomaly model.** The same `VerificationLog` rows become labelled
-  training data once there is real volume. That is the upgrade path, not a
-  missing piece.
 
 ## Where this sits against Indian regulation
 

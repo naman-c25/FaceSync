@@ -1,20 +1,18 @@
-# Frontend — four apps, one stylesheet
+# Frontend — three apps, one stylesheet
 
 React + Vite. Mobile-first, because everyone you share the link with will open
 it on a phone.
 
-## The four surfaces
+## The three surfaces
 
 Split by path, not folded together. Nothing customer-facing should carry code
-that charges money, and nothing should carry code that reads every terminal's
-traffic.
+that charges money.
 
 | path | who | what |
 |---|---|---|
 | `/` | anyone | landing page, and the kiosk pay flow |
 | `/user` | customer | sign in / sign up, payment settings, history |
 | `/merchant` | shop | sign in / sign up, till, payment history |
-| `/fraud` | admin | flag review, and approving shops |
 
 `/user` and `/merchant` are the routes. There were `/account` and `/till`
 aliases for a while; they were removed rather than kept, so there is one URL per
@@ -26,14 +24,14 @@ registered, they are told so and asked for its PIN instead of silently getting a
 second record.
 
 Shared pieces live in `src/components/`: `Wordmark.jsx` and `SettingRow.jsx` are
-used by all four so the surfaces stay visually identical.
+used by all three so the surfaces stay visually identical.
 
 **Scrolling.** The landing page uses Lenis for momentum scrolling
 (`useSmoothScroll.js`), with a try/catch fallback to native scroll if it fails to
 load. Scroll progress is written to CSS custom properties (`--scroll`, `--p`)
 rather than React state, so a scroll does not re-render the tree.
 
-**Watch out for unscoped CSS.** One stylesheet across four apps means a generic
+**Watch out for unscoped CSS.** One stylesheet across three apps means a generic
 selector reaches further than intended. Landing-page `.steps` and `.card` rules
 once overrode the camera's liveness dots and the kiosk cards. Landing styles are
 now scoped under `.landing`.

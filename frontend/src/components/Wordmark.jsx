@@ -2,7 +2,7 @@
  * The FaceSync mark, shared by every screen.
  *
  * It exists because there were two: the landing page carried a drawn logo
- * while the kiosk, the till, the portal and the fraud desk each carried a
+ * while the kiosk, the till and the portal each carried a
  * green dot. Clicking through from one to the other read as leaving the
  * product, which is the opposite of what a mark is for.
  *

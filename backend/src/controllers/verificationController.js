@@ -7,7 +7,6 @@ import { checkPinAttempt } from '../services/pin.js';
 import { Session } from '../models/Session.js';
 import { Merchant } from '../models/Merchant.js';
 import { VerificationLog } from '../models/VerificationLog.js';
-import { evaluate } from '../services/fraudRuleEngine.js';
 import {
   identifyFromSession,
   livenessFields,
@@ -60,9 +59,9 @@ async function loadSession(sessionId) {
  * Write one row to the audit trail.
  *
  * Every attempt is logged, including the ones that never reached matching.
- * A liveness failure is the most interesting row in the table for fraud
- * analysis — it is what a spoof attempt looks like — so leaving those out
- * would omit exactly the data Phase 4 needs.
+ * A liveness failure is the most interesting row in the table — it is what a
+ * spoof attempt looks like — so leaving those out would omit exactly the rows
+ * worth reading later.
  */
 async function writeLog(session, fields) {
   const log = await VerificationLog.create({
@@ -74,11 +73,6 @@ async function writeLog(session, fields) {
     challenge: session.challenge,
     ...fields,
   });
-
-  // Checked here rather than on a schedule: the trigger for a fraud rule is
-  // "a row was just written", and this is where that happens. `evaluate`
-  // never throws -- a heuristic must not be able to fail a payment.
-  await evaluate(log);
 
   return log;
 }

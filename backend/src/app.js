@@ -9,7 +9,6 @@ import { config } from './config/index.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { authLimiter, globalLimiter, sessionLimiter } from './middleware/rateLimit.js';
 import { enrollmentRoutes } from './routes/enrollmentRoutes.js';
-import { fraudRoutes } from './routes/fraudRoutes.js';
 import { merchantRoutes } from './routes/merchantRoutes.js';
 import { userRoutes } from './routes/userRoutes.js';
 import { verificationRoutes } from './routes/verificationRoutes.js';
@@ -146,7 +145,6 @@ export function createApp() {
   app.use('/api/verify', verificationRoutes);
   app.use('/api/merchant', merchantRoutes);
   app.use('/api/user', userRoutes);
-  app.use('/api/fraud', fraudRoutes);
 
   serveFrontendIfBuilt(app);
 

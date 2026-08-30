@@ -2,7 +2,7 @@
  * A stable identifier for the machine this kiosk or till is running on.
  *
  * Every verification used to be logged as `web-kiosk` or `till` — a label for
- * which *app* was open, not which device it was open on. Fraud rules that
+ * which *app* was open, not which device it was open on. Any analysis that
  * group by terminal need the second thing: "five failures at this counter in
  * five minutes" is a signal, while "five failures across every kiosk in the
  * world" is a traffic report.

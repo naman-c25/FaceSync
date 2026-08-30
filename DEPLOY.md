@@ -288,7 +288,6 @@ cd backend
 npm run users                         # who is enrolled, and their scan history
 node src/scripts/dedupe.js            # duplicate registrations, dry run
 node src/scripts/dedupe.js --apply    # remove them
-npm run fraud:replay -- --sweep       # every rule over the whole log
 ```
 
 Prefix with `MONGODB_URI=...` to run against a deployed database.
@@ -324,5 +323,6 @@ other. Enrollment collapses repeats now, so this only affects older records.
 **`liveness_failed` constantly** — usually light. A backlit face defeats it. It
 is the largest single failure kind in the log, at 26% of all attempts.
 
-**A shop signs in but cannot scan** — it has not been approved yet. Approve it at
-`/fraud`, or with `seedMerchant.js --verify <email>`.
+**A shop signs in but cannot scan** — it has not been approved yet. Approve it
+with `node src/scripts/seedMerchant.js --verify <email>`. There is no screen for
+this; approval is a command.

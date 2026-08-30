@@ -12,8 +12,7 @@
     "dev": "node --watch src/server.js",
     "test": "node --env-file=tests/test.env --test --test-concurrency=1 \"tests/*.test.js\"",
     "keygen": "node src/scripts/generateKey.js",
-    "users": "node src/scripts/listUsers.js",
-    "fraud:replay": "node src/scripts/replayFraudRules.js"
+    "users": "node src/scripts/listUsers.js"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

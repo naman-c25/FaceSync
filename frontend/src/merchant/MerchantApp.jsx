@@ -158,14 +158,6 @@ function SignIn({ onSignedIn }) {
         ? await merchantApi.register(name.trim(), email.trim(), password)
         : await merchantApi.login(email.trim(), password);
 
-      // An admin has no till. Signing in here used to hand them one and then
-      // fail every call it made, because `requireMerchant` turns the admin
-      // role away -- so send them where their account actually works.
-      if (account.role === 'admin') {
-        window.location.href = '/fraud';
-        return;
-      }
-
       onSignedIn(account);
     } catch (cause) {
       setError(cause.message);

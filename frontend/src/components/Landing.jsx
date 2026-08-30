@@ -317,9 +317,6 @@ export function Landing({ offline, onPay }) {
               doors; a third that means nothing to them is clutter, and there
               is no reason to point every visitor at an admin surface. Not a
               secret either -- `requireAdmin` is what protects it. */}
-          <a className="foot-admin" href="/fraud">
-            Fraud review
-          </a>
           <span>
             Prototype for the Razorpay hackathon — payments run in test mode,
             and the background footage is an illustration rather than a

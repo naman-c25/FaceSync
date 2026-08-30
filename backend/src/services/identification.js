@@ -4,7 +4,6 @@ import { User } from '../models/User.js';
 import { VerificationLog } from '../models/VerificationLog.js';
 import { buildCandidatePool, recordSighting } from './candidatePool.js';
 import { encryptEmbedding } from './encryption.js';
-import { evaluate } from './fraudRuleEngine.js';
 import { mlService } from './mlServiceClient.js';
 
 /**
@@ -122,7 +121,6 @@ export async function identifyFromSession(session, { completeOnMatch = true } = 
   // place the rules have to run. `evaluate` filters on the outcome before it
   // touches the database, so a successful match -- the common case here --
   // costs nothing.
-  await evaluate(log);
 
   if (matchedUser) {
     // Deliberately not awaited into the response path: an authorised payment

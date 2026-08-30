@@ -41,7 +41,7 @@ class MerchantApiError extends Error {
   }
 }
 
-// Exported so the fraud dashboard can reuse the transport without a second
+// Exported so another surface can reuse the transport without a second
 // copy of the token handling and the 401 rule. It stays here rather than
 // moving to a shared module because this is where the token lives.
 export async function request(method, path, body) {

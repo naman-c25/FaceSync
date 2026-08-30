@@ -29,14 +29,13 @@ password can.
 
 ```bash
 npm start               # needs MongoDB and the ML service running
-npm test                # 151 tests. Needs MongoDB; the ML service is stubbed
+npm test                # 135 tests. Needs MongoDB; the ML service is stubbed
 ```
 
 Handy scripts:
 
 ```bash
 npm run users                     # who is enrolled, their scan history, failure mix
-npm run fraud:replay -- --sweep   # every fraud rule over the whole log
 npm run keygen                    # a new ENCRYPTION_KEY (see the warning above)
 node src/scripts/seedMerchant.js  # create / approve / reset a shop account
 node src/scripts/dedupe.js        # duplicate registrations, dry run
@@ -60,7 +59,7 @@ python tools/kiosk_demo.py verify --merchant shop-1
 
 ## API
 
-27 routes. Who may call each one is the important column.
+21 routes. Who may call each one is the important column.
 
 **Open — the kiosk, no account needed**
 
@@ -103,21 +102,9 @@ POST /api/merchant/charge
 POST /api/merchant/verify/start   needs approval as well as a token
 ```
 
-**Admin only** — the whole `/api/fraud` router is gated at the router, so a
-route added later cannot forget to ask.
-
-```
-GET  /api/fraud/flags
-GET  /api/fraud/flags/:id
-POST /api/fraud/flags/:id/clear
-POST /api/fraud/flags/:id/confirm
-GET  /api/fraud/merchants/pending
-POST /api/fraud/merchants/:id/verify
-```
-
-Three roles, three middlewares: `requireUser`, `requireMerchant`,
-`requireAdmin`. Admins sign in through the merchant login endpoint and get a
-token carrying `role: 'admin'` — one account table, one token format.
+Two roles, two middlewares: `requireUser` and `requireMerchant`. The tokens are
+signed with different keys, so a customer token cannot verify on a shop route
+and the separation is cryptographic rather than a field comparison.
 
 A rejected enrollment frame comes back as `200 { accepted: false, reason }`,
 not an error. A blurry frame is part of the normal flow — the kiosk should show
@@ -221,8 +208,8 @@ memory already has the key.
 
 ## The audit trail
 
-`VerificationLog` is both the audit record and the entire dataset the fraud
-rules run on. Anything not recorded is unrecoverable later, so the schema keeps
+`VerificationLog` is the audit record, and the only account of what the system
+decided. Anything not recorded is unrecoverable later, so the schema keeps
 more than is needed today.
 
 Two fields are easy to leave out and expensive to add back:
@@ -233,42 +220,16 @@ Two fields are easy to leave out and expensive to add back:
   at the time.
 - **`probeEmbedding`**, kept on failures only, is what allows the same
   unidentified face to be recognised turning up repeatedly across merchants —
-  a far stronger fraud signal than a count of failed attempts. It is encrypted
+  a far stronger signal than a count of failed attempts. It is encrypted
   like any other embedding, and is not retained on a successful match, where it
   would only duplicate an identity already on file.
 
 Liveness failures are logged too. They are the most interesting rows in the
-table for fraud analysis, because a spoof attempt is what one looks like.
+table, because a spoof attempt is what one looks like.
 
 **Known gap:** a session the user simply abandons writes no row — it expires
 via TTL and disappears. Repeated abandonment is a weak signal next to actual
 failures, so it is not built.
-
-## Fraud rules
-
-`src/rules/` holds three, and `services/fraudRuleEngine.js` runs them on every
-log write. It never throws — a rule that fails must not take a payment down with
-it — and it collapses a burst into one incident rather than one flag per row.
-
-| rule | fires at | severity |
-|---|---|---|
-| `pin_velocity` | 3 refused PINs in 5 min, naming the target | high_risk |
-| `spoof_burst` | 3 presentation attacks in 5 min | suspicious |
-| `liveness_velocity` | 5 liveness failures in 5 min, excluding attacks | review |
-
-`npm run fraud:replay -- --sweep` re-runs every rule over the whole log at every
-threshold. It imports `RULES` rather than restating them, so the printed numbers
-cannot drift from the shipped code.
-
-**Two more rules were specified and not built.** "Many distinct people at one
-terminal" and "a spike in ambiguous results" fire zero times at every threshold
-over all 290 real logs — there are 17 enrolled users and not one `ambiguous`
-outcome in the file. Shipping them so the count reads four would be decoration.
-`src/rules/index.js` records why.
-
-**Not a trained model, deliberately.** There is no real fraud data to train on,
-and training on invented fraud would be theatre. These same rows become labelled
-training data once there is volume; that is the upgrade path, not a gap.
 
 ## Two authorization bugs worth knowing about
 
@@ -297,7 +258,7 @@ the old route and seals behind it.
 
 Anyone can open a shop account and it grants nothing: the terminal can sign in
 and read its own empty ledger, and that is all. Starting a scan needs approval,
-from `/fraud` or `seedMerchant.js --verify <email>`.
+a command rather than a screen: `seedMerchant.js --verify <email>`.
 
 The split is not about money — charging already needs the customer's own PIN, so
 a hostile shop cannot take anything. What an unapproved terminal could do is

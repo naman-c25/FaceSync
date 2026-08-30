@@ -3,8 +3,7 @@ import mongoose from 'mongoose';
 /**
  * One row per verification attempt, successful or not.
  *
- * This is the audit trail, and it is also the entire dataset Phase 4's fraud
- * detection will run on. Anything not recorded here is unrecoverable later, so
+ * This is the audit trail, and the only record of what the system decided. Anything not recorded here is unrecoverable later, so
  * the schema errs toward keeping more than is needed today — a field that goes
  * unused costs a few bytes, while a missing one costs a re-run of every test
  * session.
@@ -17,7 +16,7 @@ import mongoose from 'mongoose';
  *   force at the time.
  * - `probeEmbedding` is retained on failures. It is what allows the same
  *   unidentified face to be recognised turning up repeatedly across merchants,
- *   which is a far stronger fraud signal than a count of failed attempts.
+ *   which is a far stronger signal than a count of failed attempts.
  */
 const verificationLogSchema = new mongoose.Schema(
   {
@@ -186,9 +185,9 @@ const verificationLogSchema = new mongoose.Schema(
 verificationLogSchema.index({ merchantId: 1, createdAt: -1 });
 verificationLogSchema.index({ matchedUser: 1, createdAt: -1 });
 verificationLogSchema.index({ outcome: 1, createdAt: -1 });
-// Every fraud rule asks the same question -- what else happened at this
-// terminal in the last few minutes -- and without this it is a collection scan
-// on the hot path of every log write.
+// Answers "what else happened at this terminal recently", which is the shape
+// every later analysis of this table wants. Without it that is a collection
+// scan on the hot path of every log write.
 verificationLogSchema.index({ deviceId: 1, createdAt: -1 });
 
 export const VerificationLog = mongoose.model(
