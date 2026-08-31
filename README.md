@@ -87,8 +87,8 @@ python tools/kiosk_demo.py verify --merchant shop-1
 ## Tests
 
 ```bash
-cd ml-service && pytest         # 174  (158 without the model-loading ones)
-cd backend && npm test          # 135  (needs MongoDB; the ML service is stubbed)
+cd ml-service && pytest         # 237  (221 without the model-loading ones)
+cd backend && npm test          # 148  (needs MongoDB; the ML service is stubbed)
 cd frontend && npm run lint     # rules-of-hooks, mainly
 ```
 
@@ -302,6 +302,36 @@ describing the running system.
 This is also the honest answer to "do we need a vector database". Not for
 accuracy and not for speed: the search was never the slow part.
 
+### The gallery moved out of the request
+
+Every match used to ship the whole candidate pool to the ML service: 5.6MB of
+base64 at two thousand users, serialised in Node, parsed in Python, then decoded
+one entry at a time into a list that `np.stack` immediately copied into a fresh
+matrix -- once per scan, for vectors that do not change between scans.
+
+It is pushed once now and a scan sends ids. Measured against the real service:
+
+```
+                    payload             latency        decision
+N = 2,017    5.60 MB -> 23 KB     50.5 -> 3.0 ms      identical
+N = 5,486   15.23 MB -> 58 KB    138.3 -> 6.2 ms      identical
+```
+
+**Identical is the word that matters.** A speed change to the matching path is
+only acceptable if it is provably not an accuracy change, so `identify` was
+refactored to delegate to the same function the new path calls -- one
+implementation, two entry points -- and `test_gallery_store.py` asserts that 300
+probes give bit-equal top scores, runner-up scores and margins either way.
+
+A stale gallery is refused rather than answered, because one missing the person
+standing at the till returns `no_match`, which looks exactly like a stranger.
+Node re-pushes and retries; a failed push falls back to shipping the vectors
+inline, so a sync problem costs speed and not service.
+
+The gallery is also warmed at boot rather than on the first customer. At ten
+thousand signatures the cold build ran about 30 seconds against a 15-second ML
+timeout, so the first scan after a deploy did not merely feel slow -- it failed.
+
 ### Bucketing the gallery, and why it cannot help
 
 The obvious next idea is the one every vector index uses: cluster the gallery
@@ -424,8 +454,11 @@ normal is clamping far down: the single sample the models get wrong is also the
 only one whose crop collapses to 1.21. So there is a floor rather than an exact
 fit, and below it the verdict is *no verdict* rather than a bad one.
 
-That is also why the kiosk's framing oval is 44% of the frame height rather
-than the 63% it started at. A face filling the frame starves the models.
+That is also why the kiosk's framing oval is sized the way it is: 51% of frame
+height, where 144 real attempts put the median achieved crop at 2.35, inside
+the band the models classify correctly. It began at 63%, which starved them.
+Growing it further is measurable rather than arguable -- at 55% a quarter of
+attempts fall short of 1.90 and at 60% it is over forty per cent.
 
 **What this does not claim.** The threshold has not yet been calibrated on the
 camera it will run on, and the authors of the models state the limitation
@@ -507,6 +540,24 @@ Each of these looked like a working system until something specific caught it.
   just the PIN, so a stranger cannot even refresh the stored signature.
   Everything registered before this gets exactly one more pass through the old
   route and seals behind it.
+
+- **The enrollment prompts were decorative.** "Turn your head slightly left"
+  went out at `/enroll/start` and nothing ever looked at it again — capture
+  checked sharpness, face count and anti-spoofing, and nothing about where the
+  head was pointing. Five samples of one unmoving head passed as five angles,
+  so the fused signature held one view recorded five times instead of the pose
+  variety it exists for. Each sample is now checked against the prompt it is
+  answering, and the refusal says which way it went wrong: "you did not move"
+  and "you moved the wrong way" need different sentences.
+- **And the pose check nearly shipped with the wrong rest position.** A new
+  `head_pitch_ratio` measures the nose between forehead and chin, and the first
+  version assumed it sits at 0.5 when level, as yaw does. A real face says
+  otherwise — 0.5154 on yaw but **0.6041 on pitch** — because the nose is not
+  halfway down the face. Against a fixed midpoint that face passed "chin down"
+  without moving and needed three times the intended movement for "chin up".
+  Proportions vary between people, so the fix is the one the liveness challenge
+  already uses: the "look straight" sample is the baseline, and every later
+  prompt is measured from it.
 
 - **Blinks would have gone undetected over a network.** Thresholds were frame
   counts, which only mean anything at a fixed frame rate. At the 5-8fps a

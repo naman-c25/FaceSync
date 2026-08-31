@@ -42,6 +42,14 @@ IMG_LEFT_FACE_EDGE = 234
 IMG_RIGHT_FACE_EDGE = 454
 NOSE_TIP = 1
 
+# Top of the forehead and the point of the chin, used with the nose tip the way
+# the face edges are used with it for yaw. The vertical equivalent, and needed
+# because nothing else measures head pitch: `gaze_vertical` is where the eyes
+# are looking inside their sockets, which is a different thing entirely. A chin
+# lifted while the eyes glance down reads as level on gaze and raised on this.
+FOREHEAD_TOP = 10
+CHIN_BOTTOM = 152
+
 # The iris ring only exists in the refined 478-point output. If a model bundle
 # ever returns the bare 468, gaze silently becomes nonsense, so we check.
 LANDMARKS_WITH_IRIS = 478
@@ -79,6 +87,12 @@ class FaceGeometry:
     # does not have to care, since none of it is about crowds.
     faces_seen: int = 1
     dominance: float = float("inf")
+
+    # 0.5 = level, and it FALLS as the chin lifts -- see `head_pitch_ratio`.
+    # Defaulted for the same reason as the two above: only enrollment reads it,
+    # and the liveness tests construct geometry that has no opinion on pitch.
+    # `analyse` always supplies a real value.
+    head_pitch: float = 0.5
 
     @property
     def ear_is_meaningful(self) -> bool:
@@ -204,6 +218,34 @@ def head_yaw_ratio(points: np.ndarray) -> float:
     return to_left / span
 
 
+def head_pitch_ratio(points: np.ndarray) -> float:
+    """How far the chin is raised or lowered, as 0.0-1.0 with 0.5 level.
+
+    The same trick as `head_yaw_ratio`, turned ninety degrees: compare the nose
+    tip's distance to the top of the forehead against its distance to the point
+    of the chin. Lifting the chin rotates the face so the forehead foreshortens
+    and the chin does not, which moves the nose closer to the forehead and
+    pushes the ratio down. Lowering it does the reverse.
+
+    So **lower means chin up**, which reads backwards and is worth saying
+    plainly rather than leaving to be discovered: the ratio measures where the
+    nose sits between the two, and a raised chin brings the top of the head
+    toward the camera.
+
+    Unlike yaw, this is not mirrored -- flipping an image left to right does
+    nothing to a vertical measurement -- so there is no sign convention to
+    match against `frames_are_mirrored`.
+    """
+    nose = points[NOSE_TIP]
+    to_top = float(np.linalg.norm(nose - points[FOREHEAD_TOP]))
+    to_bottom = float(np.linalg.norm(nose - points[CHIN_BOTTOM]))
+
+    span = to_top + to_bottom
+    if span == 0:
+        return 0.5
+    return to_top / span
+
+
 def analyse(bgr: np.ndarray) -> FaceGeometry | None:
     """Extract EAR and gaze from a frame, or None if no face was found."""
     import mediapipe as mp
@@ -269,6 +311,9 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
     # reverses that, and flipping the ratio here keeps every downstream
     # comparison written in image-space terms.
     yaw = head_yaw_ratio(points)
+    # Not flipped below: mirroring an image reverses left and right, not up
+    # and down.
+    pitch = head_pitch_ratio(points)
 
     if settings.frames_are_mirrored:
         gaze_h = 1.0 - gaze_h
@@ -289,5 +334,6 @@ def analyse(bgr: np.ndarray) -> FaceGeometry | None:
         gaze_horizontal=round(gaze_h, 4),
         gaze_vertical=round(gaze_v, 4),
         head_yaw=round(yaw, 4),
+        head_pitch=round(pitch, 4),
         frontality=round(frontality, 4),
     )

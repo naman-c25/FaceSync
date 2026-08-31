@@ -30,6 +30,41 @@ class EnrollmentSession:
     samples: list[np.ndarray] = field(default_factory=list)
     rejected_frames: int = 0
 
+    # The prompts this session was handed, in order, so a capture can be
+    # checked against the pose that was actually asked for. Held here rather
+    # than sent with each frame for the same reason the shop id is not in the
+    # request body: a prompt from the caller is a prompt the caller chose, and
+    # a client that sent "look straight" every time would be back to no check
+    # at all.
+    guidance: list[str] = field(default_factory=list)
+
+    # Where this person's head sits at rest, measured from their own first
+    # sample rather than assumed.
+    #
+    # Assuming 0.5 was a bug, and a real face shows why: yaw does land near
+    # 0.5, but pitch does not. The nose is not midway between the top of the
+    # forehead and the point of the chin -- on one measured face it reads 0.60
+    # level, which would have made "chin down" pass without moving and "chin
+    # up" need three times the intended movement. Face proportions vary, so
+    # there is no better constant to pick either.
+    #
+    # The first prompt is "Look straight at the camera", so the baseline is
+    # simply that sample. This is the same thing the liveness challenge does
+    # for its look steps, and for the same reason.
+    baseline_yaw: float | None = None
+    baseline_pitch: float | None = None
+
+    @property
+    def current_prompt(self) -> str | None:
+        """The prompt the next sample is answering.
+
+        The last prompt repeats if more samples are taken than there are
+        prompts, which mirrors what the kiosk displays.
+        """
+        if not self.guidance:
+            return None
+        return self.guidance[min(len(self.samples), len(self.guidance) - 1)]
+
     def is_expired(self) -> bool:
         return time.monotonic() - self.last_seen_at > settings.session_ttl_seconds
 

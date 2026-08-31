@@ -29,7 +29,7 @@ password can.
 
 ```bash
 npm start               # needs MongoDB and the ML service running
-npm test                # 135 tests. Needs MongoDB; the ML service is stubbed
+npm test                # 148 tests. Needs MongoDB; the ML service is stubbed
 ```
 
 Handy scripts:
@@ -38,6 +38,7 @@ Handy scripts:
 npm run users                     # who is enrolled, their scan history, failure mix
 npm run keygen                    # a new ENCRYPTION_KEY (see the warning above)
 node src/scripts/seedMerchant.js  # create / approve / reset a shop account
+node src/scripts/seedMerchant.js --set-region delhi shop@x.test
 node src/scripts/dedupe.js        # duplicate registrations, dry run
 ```
 
@@ -93,7 +94,7 @@ DELETE /api/user/me               delete the face data
 merchant token.
 
 ```
-POST /api/merchant/register       open a shop account (unapproved)
+POST /api/merchant/register       open a shop account (unapproved; optional region)
 POST /api/merchant/login
 GET  /api/merchant/me
 GET  /api/merchant/stats
@@ -297,6 +298,50 @@ running during a demo and the connection is already open.
 The tradeoff worth naming: MongoDB's TTL monitor sweeps about once a minute, so
 a record can outlive its `expiresAt` by up to that long. Every read checks
 `expiresAt` itself, so the lag is invisible.
+
+## The gallery lives in the ML service
+
+`services/gallerySync.js` pushes the signatures to Python once and every scan
+afterwards sends ids. Shipping the pool per scan was 5.6MB of base64 at two
+thousand users; measured against the real service, the round trip went from
+50.5ms to 3.0ms and the decision came back identical.
+
+Two independent things keep the copies in step, because a gallery missing the
+person at the till returns `no_match` and that is indistinguishable from a
+stranger:
+
+- This side tracks which ids it pushed, so a pool containing one it has not sent
+  re-pushes before the match goes out. That covers somebody enrolling and paying
+  moments later.
+- Python refuses a `gallery_id` it does not recognise, so a restart of either
+  process resolves on the next request rather than matching against a gallery
+  that is quietly missing people.
+
+A failed push returns null and the caller ships the pool inline as it always
+did — a sync problem costs speed, not service, which is the only basis on which
+this was worth adding to something that already worked.
+
+`gallerySync.warm()` runs at boot, not awaited. At ten thousand signatures the
+cold build was about 30 seconds against a 15-second ML timeout, so the first
+scan after a deploy did not merely feel slow, it failed. A service that refuses
+to start because it could not pre-warm a cache would be worse.
+
+## Where a terminal's area comes from
+
+`homeRegion` narrows the candidate pool, and a smaller pool is a proportionally
+smaller false match rate — system FMR grows as `N x` the per-comparison rate.
+
+It had never been written. The field existed, `recordSighting` was ready to set
+it, and nothing supplied a region: the till read `merchant.region` from `/me`
+and posted it back, so a value the server already held made a round trip through
+the browser and stopped being something the server knew. The same shape as the
+shop id, which is how an unapproved terminal once scanned customers.
+
+The region now comes from the shop's own row — no extra query, since the
+approval check already reads that document — and from `KIOSK_REGION` for the
+public kiosk. Set one with `seedMerchant.js --set-region <area> <email>`, or at
+signup. Null is a working answer: narrowing still happens by repeat-customer
+history.
 
 ## Request limits
 

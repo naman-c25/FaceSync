@@ -208,6 +208,14 @@ def main() -> int:
         "Run both ways and compare the cross-camera number, which is the only "
         "one it should move much.",
     )
+    parser.add_argument(
+        "--save",
+        metavar="PATH",
+        help="fit on everything and write the model here, for pad_texture.py "
+        "to load. Only worth doing once the verdict below says USABLE -- "
+        "saving a model this tool has just called too weak is how a number "
+        "nobody believed ends up gating payments.",
+    )
     args = parser.parse_args()
 
     loaded = load(Path(args.data).resolve(), normalise=not args.no_colour_constancy)
@@ -264,6 +272,26 @@ def main() -> int:
         print("payment can rest on. More data and more varied conditions before")
         print("anything else -- or accept that the active challenge is what")
         print("stops a photograph here.")
+
+    if args.save:
+        # Fitted on everything, which is right for the model that ships and
+        # wrong for measuring it -- the protocols above are the measurement,
+        # and they held data out precisely so this one does not have to.
+        import joblib
+
+        destination = Path(args.save).resolve()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        fitted = model()
+        fitted.fit(X, y)
+        joblib.dump(fitted, destination)
+
+        real = int((y == 0).sum())
+        print(f"\nWrote {destination}")
+        print(f"  fitted on all {len(y)} samples, {real} of them real")
+        print("  pad_texture.py picks this up on the next restart, and is")
+        print("  consulted only where the CNN is unsure -- see pad.py.")
+
     return 0
 
 

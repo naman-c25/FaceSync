@@ -12,11 +12,25 @@
  * at once.
  *
  * The anti-spoof models crop outward from the face by a fixed factor, so the
- * bigger the face the less they get: at 46% of frame height they achieve about
- * 2.2, which is inside the 1.90-2.62 band every reference sample they classify
- * correctly sits in. A face *filling* the frame collapses that to 1.2, which is
- * where the one sample they get wrong sits and where the verdict is thrown
- * away instead. 63%, which this started at, was over that line.
+ * bigger the face the less they get. A face *filling* the frame collapses that
+ * to 1.2, which is where the one reference sample they get wrong sits and
+ * where the verdict is thrown away instead. 63%, which this started at, was
+ * over that line.
+ *
+ * 51% of frame height, raised from 46% because the guide read as cramped. The
+ * cost of that is measured rather than guessed -- 144 real attempts recorded
+ * the crop scale they achieved at 46%, and dividing through by the growth
+ * gives what each size would have produced:
+ *
+ *     46%   median 2.59    8% of attempts under 1.90    1% under 1.50
+ *     51%   median 2.35   15%                           3%
+ *     55%   median 2.16   25%                           6%
+ *     60%   median 1.99   42%                           8%
+ *
+ * 51% keeps the median inside the working band and roughly doubles the tail
+ * that lands short of it. 55% and beyond does not, which is where this stops.
+ * `spoofCropScale` is on every audit row, so the real distribution after this
+ * change can be read back rather than argued about.
  *
  * Pulling further back is not free either. Measured on one real face at three
  * framings, the score went 0.901 at 43% of frame height, 0.778 at 25% and
@@ -40,7 +54,7 @@ function FaceGuide({ tone }) {
       <defs>
         <mask id="face-guide-cutout">
           <rect width="300" height="400" fill="white" />
-          <ellipse cx="150" cy="182" rx="69" ry="92" fill="black" />
+          <ellipse cx="150" cy="182" rx="76" ry="101" fill="black" />
         </mask>
       </defs>
       <rect
@@ -49,7 +63,7 @@ function FaceGuide({ tone }) {
         height="400"
         mask="url(#face-guide-cutout)"
       />
-      <ellipse className="face-guide-ring" cx="150" cy="182" rx="69" ry="92" />
+      <ellipse className="face-guide-ring" cx="150" cy="182" rx="76" ry="101" />
     </svg>
   );
 }

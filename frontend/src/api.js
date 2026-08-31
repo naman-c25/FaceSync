@@ -81,6 +81,19 @@ const REASONS = {
   low_detection_confidence: 'Face unclear. Try better lighting',
   undecodable_image: 'The frame did not come through. Trying again',
   challenge_timeout: 'Took too long — let us try that again',
+
+  // Enrollment poses. The prompts used to be decorative -- whatever you did,
+  // the sample was taken -- so these are new, and the wrong-way ones matter
+  // most: telling somebody to "turn further" when they have turned the wrong
+  // way sends them further wrong.
+  'pose:turned_right': 'Other way — turn your head to your left',
+  'pose:turned_left': 'Other way — turn your head to your right',
+  'pose:not_turned_enough': 'Turn your head a little further',
+  'pose:chin_up': 'Other way — lower your chin',
+  'pose:chin_down': 'Other way — lift your chin',
+  'pose:not_tilted_enough': 'Tilt your chin a little further',
+  'pose:pose_not_straight': 'Face the camera straight on',
+  face_not_measurable: 'Could not read your face clearly. Try better light',
   frame_budget_exceeded: 'That did not look live. Try again',
   face_lost: 'Your face left the frame',
   // The anti-spoof models, which name the attack they saw.

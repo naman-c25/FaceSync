@@ -219,6 +219,29 @@ class Settings(BaseSettings):
     # a genuine turn moves yaw by 0.28-0.62, hundreds of times this.
     baseline_stillness: float = 0.02
 
+    # How far the head has to move for an enrollment prompt to count.
+    #
+    # Deliberately loose. The job is to catch somebody who did not move at all,
+    # or moved the wrong way -- not to grade the angle. Tight thresholds here
+    # would turn registering into a game, and the samples worth having are the
+    # ones a person produces while genuinely trying.
+    #
+    # Both are offsets from the 0.5 rest position of their ratio, so 0.06 means
+    # the nose has to shift six per cent of the face's span.
+    enrollment_turn_offset: float = 0.06
+    enrollment_tilt_offset: float = 0.05
+
+    # And how square a "look straight at the camera" sample has to be. Lower
+    # than the blink gate (0.75), because this only has to rule out a head
+    # still turned from the previous prompt.
+    enrollment_straight_frontality: float = 0.70
+
+    # Whether a wrong pose actually rejects the sample, or is only reported.
+    # On, because an unchecked prompt was the bug -- but a single switch, since
+    # this is the kind of gate that can turn out to be too strict on a camera
+    # nobody has tried yet.
+    enrollment_pose_enforce: bool = True
+
     # Set true only if the frontend sends a horizontally flipped frame.
     # getUserMedia delivers an unmirrored frame and a CSS scaleX(-1) preview
     # mirrors the *display* only, so the default is correct for the usual
@@ -414,6 +437,30 @@ class Settings(BaseSettings):
     # is tools/collect_pad.py and tools/silent_pad.py --data, run on the camera
     # this will serve, which give a labelled table instead of a reading.
     pad_threshold: float = 0.70
+
+    # The band where the CNN is not confident enough to decide alone.
+    #
+    # Above the high mark it is called real, below the low mark an attack, and
+    # in between a second model reads the same crop -- colour texture rather
+    # than convolutional features, so it is wrong in different places. See
+    # pad_texture.py.
+    #
+    # The band brackets `pad_threshold` because that is where the two
+    # populations overlap: genuine faces in poor light land at 0.55-0.60 and
+    # screen attacks at 0.45-0.46, which is far too close for one number to
+    # separate. Everything outside it keeps the behaviour it has today.
+    #
+    # With no texture model present the band collapses to `pad_threshold` and
+    # nothing changes at all -- which is the state this ships in, because the
+    # model needs data that has not been captured yet.
+    pad_uncertain_low: float = 0.40
+    pad_uncertain_high: float = 0.75
+
+    # How much the second opinion has to like a face to rescue one the CNN was
+    # unsure about. Higher than `pad_threshold` on purpose: it is only ever
+    # consulted about faces already under suspicion, so it should have to be
+    # more certain than the model that raised the doubt.
+    pad_texture_threshold: float = 0.60
 
     # Whether a verdict actually stops a payment, or is only recorded.
     #

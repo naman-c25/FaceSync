@@ -21,6 +21,7 @@ from fastapi import FastAPI, HTTPException
 import face_detection
 import pad
 import preprocessing
+import enrollment_pose
 import gallery_store
 import recognition
 from config import settings
@@ -195,13 +196,17 @@ def health() -> HealthResponse:
 
 @app.post("/enroll/start", response_model=EnrollmentStartResponse)
 def enroll_start() -> EnrollmentStartResponse:
+    guidance = ENROLLMENT_GUIDANCE[: settings.max_enrollment_samples]
     session = enrollment_sessions.put(
-        EnrollmentSession(session_id=enrollment_sessions.new_id())
+        EnrollmentSession(
+            session_id=enrollment_sessions.new_id(),
+            guidance=list(guidance),
+        )
     )
     return EnrollmentStartResponse(
         session_id=session.session_id,
         samples_required=settings.min_enrollment_samples,
-        guidance=ENROLLMENT_GUIDANCE[: settings.max_enrollment_samples],
+        guidance=guidance,
     )
 
 
@@ -264,6 +269,60 @@ def enroll_capture(request: FrameRequest) -> EnrollmentCaptureResponse:
             reason=f"presentation_attack:{verdict.label_text}",
             sharpness=round(quality.sharpness, 2),
         )
+
+    # Is this the pose that was asked for?
+    #
+    # Until now the prompts were decorative: the guidance went out at
+    # /enroll/start and nothing ever looked at it again, so five samples of one
+    # unmoving head passed as five angles. The whole point of guided angles is
+    # pose variety in the fused signature, and without this there was none.
+    #
+    # Needs the mesh rather than the detector's five keypoints, so it runs
+    # after the cheaper gates above -- a blurry frame or a photograph is
+    # refused before spending a landmark pass on it.
+    wanted = enrollment_pose.for_prompt(session.current_prompt)
+    if wanted is not None:
+        geometry = face_detection.analyse(frame)
+        if geometry is None:
+            session.rejected_frames += 1
+            return EnrollmentCaptureResponse(
+                accepted=False,
+                samples_collected=len(session.samples),
+                samples_required=settings.min_enrollment_samples,
+                reason="face_not_measurable",
+                sharpness=round(quality.sharpness, 2),
+            )
+
+        pose = enrollment_pose.check(
+            wanted,
+            yaw=geometry.head_yaw,
+            pitch=geometry.head_pitch,
+            frontality=geometry.frontality,
+            turn=settings.enrollment_turn_offset,
+            tilt=settings.enrollment_tilt_offset,
+            straight=settings.enrollment_straight_frontality,
+            baseline_yaw=session.baseline_yaw,
+            baseline_pitch=session.baseline_pitch,
+        )
+
+        if not pose.ok and settings.enrollment_pose_enforce:
+            session.rejected_frames += 1
+            return EnrollmentCaptureResponse(
+                accepted=False,
+                samples_collected=len(session.samples),
+                samples_required=settings.min_enrollment_samples,
+                reason=f"pose:{pose.reason}",
+                sharpness=round(quality.sharpness, 2),
+            )
+
+        # The first prompt asks for a face looking straight ahead, so an
+        # accepted straight sample is this person's rest position -- which is
+        # what every later prompt is measured against. Assuming 0.5 instead was
+        # a bug: a real level face reads about 0.60 on pitch, and against a
+        # fixed midpoint "chin down" passed without moving.
+        if wanted is enrollment_pose.Pose.STRAIGHT and session.baseline_yaw is None:
+            session.baseline_yaw = geometry.head_yaw
+            session.baseline_pitch = geometry.head_pitch
 
     session.samples.append(face.embedding)
     return EnrollmentCaptureResponse(

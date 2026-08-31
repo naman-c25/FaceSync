@@ -38,9 +38,11 @@ verdict at all: `available` comes back False and the caller must not read that
 as either outcome. The achieved scale is reported either way, so the floor can
 be moved once a real camera has produced numbers.
 
-The framing that follows: a face at 38-50% of frame height is what the working
-samples have, which is why the kiosk guide is sized to put it there. Filling the
-frame with a face is what drives the crop down to 1.2.
+The framing that follows: the kiosk guide is sized to put a face at about half
+the frame height, which is where 144 measured attempts achieve a median crop of
+2.35. Filling the frame is what drives the crop down to 1.2, and every attempt
+records its `spoofCropScale`, so the guide can be resized against real numbers
+rather than an argument.
 """
 
 import threading
@@ -49,6 +51,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+
+import pad_texture
 
 from config import settings
 
@@ -83,10 +87,26 @@ class SpoofVerdict:
     crop_scale: float = 0.0
     reason: str | None = None
 
+    # The texture model's read, when it was consulted. None means it was not:
+    # either the CNN was confident enough to decide alone, or no such model is
+    # installed. Recorded either way so the audit trail says which model
+    # actually turned somebody away.
+    texture_score: float | None = None
+    decided_by: str = "cnn"
+
     @property
     def is_attack(self) -> bool:
-        """Only ever true when there was enough of a crop to judge from."""
-        return self.available and self.real_score < settings.pad_threshold
+        """Only ever true when there was enough of a crop to judge from.
+
+        Inside the uncertain band the answer comes from the texture model, and
+        outside it from the CNN alone -- which is every case today, since no
+        texture model ships. See `_second_opinion`.
+        """
+        if not self.available:
+            return False
+        if self.texture_score is not None:
+            return self.texture_score < settings.pad_texture_threshold
+        return self.real_score < settings.pad_threshold
 
 
 def models_present() -> bool:
@@ -180,6 +200,11 @@ def assess(bgr: np.ndarray, bbox) -> SpoofVerdict:
     totals = np.zeros(3, dtype=np.float64)
     used = 0
     worst_scale = float("inf")
+    # Kept explicitly rather than read from the loop variables afterwards: the
+    # widest crop is the most context the texture model has to work with, and
+    # whichever iteration produced it should not depend on loop order.
+    widest_crop = None
+    widest_scale = 0.0
 
     for session, _name, scale in _load():
         expanded = _expand(width, height, bbox, scale)
@@ -192,6 +217,9 @@ def assess(bgr: np.ndarray, bbox) -> SpoofVerdict:
         crop = bgr[top : bottom + 1, left : right + 1]
         if crop.size == 0:
             continue
+
+        if achieved > widest_scale:
+            widest_scale, widest_crop = achieved, crop
 
         # BGR and 0-255, both as trained. The models came from cv2.imread
         # frames, so converting to RGB would swap two channels of a model whose
@@ -225,16 +253,38 @@ def assess(bgr: np.ndarray, bbox) -> SpoofVerdict:
 
     scores = totals / used
     label = int(np.argmax(scores))
+    real_score = round(float(scores[REAL_CLASS]), 4)
 
-    # The verdict is a threshold on the real-class score, not argmax. Argmax is
-    # what the reference does and it is the weaker reading: on the project's own
-    # sample images a held printout scores 0.728 real, which argmax calls real
-    # and a threshold catches.
+    # A second opinion, but only where the first one is not sure.
+    #
+    # The band brackets the threshold because that is where the two populations
+    # actually overlap -- genuine faces in poor light and screen attacks are
+    # about a tenth apart there, which no single number separates. Outside it
+    # the CNN decides alone, which keeps this off the common path and leaves
+    # every confident verdict exactly as it was.
+    texture_score = None
+    decided_by = "cnn"
+
+    if settings.pad_uncertain_low <= real_score <= settings.pad_uncertain_high:
+        second = (
+            pad_texture.assess(widest_crop)
+            if widest_crop is not None
+            else pad_texture.TextureVerdict(available=False, reason="no_crop")
+        )
+        if second.available:
+            texture_score = second.real_score
+            decided_by = "texture"
+
     return SpoofVerdict(
         available=True,
-        real_score=round(float(scores[REAL_CLASS]), 4),
+        # The CNN's own read, always reported. It is what every measurement in
+        # the README was taken against, and hiding it behind the ensemble would
+        # make those numbers unreproducible.
+        real_score=real_score,
         label=label,
         label_text=LABELS[label],
         models_used=used,
         crop_scale=round(worst_scale, 2),
+        texture_score=texture_score,
+        decided_by=decided_by,
     )

@@ -20,8 +20,8 @@ Interactive API docs at `http://127.0.0.1:8001/docs`.
 ```bash
 pip install -r requirements-dev.txt   # requirements.txt plus the test packages
 
-pytest                  # 174 tests
-pytest -m "not slow"    # 158, skipping the ones that load real models
+pytest                  # 237 tests
+pytest -m "not slow"    # 221, skipping the ones that load real models
 ```
 
 `requirements-dev.txt` is separate so the deployed image does not carry test
@@ -137,8 +137,20 @@ verification        /verify/start → /verify/frame ×N → /verify/match
                     liveness runs first; matching is refused until it passes
 ```
 
-`/verify/match` takes the candidate pool in the request body, since the database
-lives behind Node. Node narrows it first — by merchant locality, recent activity
+`/verify/match` takes the candidate pool by **id**. The vectors themselves are
+pushed once to `/gallery/load` and held in memory (`gallery_store.py`), because
+shipping them on every scan cost about 270ms of transport at ten thousand users
+around a comparison that takes 0.345ms — plus ten thousand base64 decodes and a
+full matrix copy, per scan, for data that only changes when somebody enrols or
+deletes.
+
+A request quoting a `gallery_id` that is not the one loaded is refused rather
+than answered: a gallery missing the person standing at the till returns
+`no_match`, which is indistinguishable from a stranger. Node re-pushes and
+retries. The old shape still works and is the fallback when a push has failed,
+so a sync problem costs speed rather than service.
+
+Node decides *which* ids are eligible — by merchant locality, recent activity
 and repeat-customer history — and widens to the whole gallery on a miss, so a
 narrowed pool can never be the reason somebody is turned away. The service does
 not care how the pool was chosen.
@@ -224,8 +236,11 @@ faces of comparable size, which the dominance rule refuses first.
   only one whose crop collapses to 1.21. So there is a floor, and below it the
   verdict is *no verdict* rather than a bad one.
 
-That is also why the kiosk's framing oval is 44% of frame height rather than the
-63% it started at. A face filling the frame starves the models.
+That is also why the kiosk's framing oval is sized the way it is: 51% of frame
+height, where 144 real attempts put the median achieved crop at 2.35, inside
+the band the models classify correctly. It began at 63%, which starved them.
+Growing it further is measurable rather than arguable -- at 55% a quarter of
+attempts fall short of 1.90 and at 60% it is over forty per cent.
 
 **What this does not claim.** The threshold has not been calibrated on the
 cameras it will run on, and the model authors state the limitation themselves:
@@ -235,6 +250,73 @@ domain shift — 120 LFW captures of real people — **9.2% were called attacks*
 threshold moves. On the cameras used here genuine faces score 0.572 and above
 while print and screen attacks top out at 0.482, but a new sensor has to be
 measured rather than assumed.
+
+## Enrollment poses are checked now
+
+The prompts used to be decorative. `ENROLLMENT_GUIDANCE` went out at
+`/enroll/start` and nothing ever looked at it again -- `/enroll/capture`
+checked sharpness, face count and anti-spoofing, and nothing about where the
+head was pointing. Five samples of one unmoving head passed as five angles, so
+the fused signature held one view recorded five times instead of the pose
+variety it exists for.
+
+`enrollment_pose.py` checks each sample against the prompt it is answering, and
+says which way it went wrong: "you did not move" and "you moved the wrong way"
+need different sentences, and giving the first when the second is true sends
+somebody further wrong.
+
+**Two things this needed getting right.**
+
+*Direction.* Prompts are in subject space and every signal is in image space.
+The subject's left is the image's right on an unmirrored frame, and getting
+that backwards would reject people for doing exactly what was asked -- worse
+than not checking. `analyse` already normalises `head_yaw` for
+`frames_are_mirrored`, so there is one convention here rather than two.
+
+*A rest position that is not 0.5.* `head_pitch_ratio` is new, and it is the
+vertical twin of the yaw ratio: the nose tip's distance to the top of the
+forehead against its distance to the chin. It **falls** as the chin lifts.
+
+Assuming it rests at 0.5 was a bug, caught on a real face before it shipped:
+
+```
+a real, level, frontal face      yaw 0.5154      pitch 0.6041
+```
+
+Yaw does sit near the midpoint. Pitch does not -- the nose is not halfway
+between forehead and chin -- so against a fixed 0.5 that face passes "chin
+down" **without moving** and needs three times the intended movement for "chin
+up". Face proportions vary, so there is no better constant either. The first
+prompt asks for a face looking straight ahead, so that accepted sample is the
+baseline every later prompt is measured against. It is the same thing the
+liveness challenge does for its look steps, for the same reason.
+
+Tolerances are deliberately loose (`enrollment_turn_offset` 0.06,
+`enrollment_tilt_offset` 0.05). The job is to catch somebody who did not move
+or moved the wrong way, not to grade the angle.
+`enrollment_pose_enforce` turns the gate off without removing the measurement.
+
+## A second opinion on spoofing
+
+`pad_texture.py` reads colour texture -- local binary patterns over HSV and
+YCbCr, the method `tools/train_pad.py` documents -- and is consulted **only
+where the MiniFASNets are unsure**, between `pad_uncertain_low` and
+`pad_uncertain_high`.
+
+That band brackets the threshold because that is where the two populations
+actually overlap: genuine faces in poor light land at 0.55-0.60 and screen
+attacks at 0.45-0.46. No single number separates those, which is exactly when a
+second, differently-wrong signal is worth having -- colour statistics fail in
+different conditions than convolutional features do.
+
+**It is not trained, and nothing here pretends otherwise.** It needs
+`benchmark-data/pad`, which `tools/collect_pad.py` fills from a real camera
+with real prints and real screens, and that capture has not happened. With no
+model file present the band collapses to the single CNN threshold and the
+behaviour is exactly what it is today -- which is what
+`tests/test_pad_ensemble.py` mostly asserts. `train_pad.py --save` writes the
+model once the data exists, and it says plainly that saving one it has just
+called too weak is how a number nobody believed ends up gating payments.
 
 ## The continuity check
 
@@ -454,7 +536,10 @@ Stated plainly, because the pitch is stronger for acknowledging them:
 | `preprocessing.py` | CLAHE lighting normalisation, quality gates |
 | `face_detection.py` | MediaPipe Face Mesh → EAR and gaze |
 | `liveness.py` | challenge and passive state machines |
+| `enrollment_pose.py` | is this sample the pose the prompt asked for |
+| `gallery_store.py` | the enrolled signatures, held as one matrix |
 | `pad.py` | the two MiniFASNets — presentation attack detection |
+| `pad_texture.py` | the second opinion, consulted only where they are unsure |
 | `recognition.py` | ArcFace embeddings, 1:N matching, enrollment fusion |
 | `session_store.py` | TTL session state, best-frame selection |
 | `schemas.py` | request/response contract with the Node layer |
@@ -473,7 +558,7 @@ service.
 | `benchmark_1n.py` | the 1:N measurement — calls `recognition.identify` itself |
 | `silent_pad.py` | run the shipped anti-spoof models over labelled images |
 | `collect_pad.py` | capture real attack/live samples — the calibration set that does not exist yet |
-| `train_pad.py` | a hand-built alternative PAD: LBP on chroma channels, SVM. Written but **never run** — it needs `benchmark-data/pad`, which `collect_pad.py` has not been used to fill. Its value is the evaluation protocol it insists on: leave-one-person-out, leave-one-condition-out, leave-one-camera-out |
+| `train_pad.py` | trains and evaluates the texture model `pad_texture.py` loads. Still **never run** — it needs `benchmark-data/pad`, which `collect_pad.py` has not been used to fill. Its evaluation protocol is half its value: leave-one-person-out, leave-one-condition-out, leave-one-camera-out. `--save` writes the fitted model, and only after the verdict says it is worth having |
 | `bucketed_gallery.py`, `bucket_check.py` | the bucketing negative above. Kept unused, as the evidence |
 | `planar_check.py`, `micromotion_check.py` | the two abandoned checks above. Same reason |
 | `landmarks_vs_arcface.py` | measures whether 478 MediaPipe landmarks can identify anyone, so that running two face models is a measured decision rather than an assertion |

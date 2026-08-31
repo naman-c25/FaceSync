@@ -117,8 +117,16 @@ def test_health_reports_loaded_models(client):
 # -- enrollment --------------------------------------------------------
 
 
-def test_enrollment_completes_and_returns_a_unit_embedding(client, faces):
+def test_enrollment_completes_and_returns_a_unit_embedding(client, faces, monkeypatch):
     import recognition
+
+    # Pose enforcement off for this one. The prompts ask the head to turn left,
+    # right, up and down, and a still photograph cannot do any of that -- so
+    # with it on, four of the five samples are correctly refused and this stops
+    # testing what it is about. What it is about is the flow and the fused
+    # embedding; the pose rule has its own tests, and the test below covers it
+    # being enforced here.
+    monkeypatch.setattr(settings, "enrollment_pose_enforce", False)
 
     session_id = client.post("/enroll/start").json()["session_id"]
 
@@ -140,6 +148,37 @@ def test_enrollment_completes_and_returns_a_unit_embedding(client, faces):
     assert embedding.shape == (recognition.EMBEDDING_DIM,)
     assert np.linalg.norm(embedding) == pytest.approx(1.0, abs=1e-5)
     assert result["mean_similarity"] > 0.9, "samples of one person should agree closely"
+
+
+def test_a_head_that_never_turns_does_not_complete_enrollment(client, faces):
+    """The prompts used to be decorative, and this is what says they are not.
+
+    Guidance went out at /enroll/start and nothing ever looked at it again, so
+    five samples of one unmoving head passed as five angles -- and the fused
+    signature, which exists to hold several views, held one view five times.
+
+    A still photograph is exactly that case: the first prompt asks for a face
+    looking straight ahead, which it satisfies, and every prompt after it asks
+    for a movement it cannot make.
+    """
+    session_id = client.post("/enroll/start").json()["session_id"]
+
+    accepted, refusals = 0, []
+    for i in range(settings.min_enrollment_samples + 2):
+        body = client.post(
+            "/enroll/capture",
+            json={"session_id": session_id, "image_b64": _to_b64(_vary(faces[0], i))},
+        ).json()
+        accepted += body["accepted"]
+        if not body["accepted"] and body.get("reason", "").startswith("pose:"):
+            refusals.append(body["reason"])
+
+    assert accepted < settings.min_enrollment_samples, (
+        "a face that never moved collected a full set of angles"
+    )
+    assert refusals, "nothing was refused for its pose"
+    # And the refusal says what to do about it, rather than a bare rejection.
+    assert all(r != "pose:" for r in refusals)
 
 
 def test_finalizing_too_early_is_rejected(client, faces):
